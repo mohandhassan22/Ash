@@ -9,3 +9,7 @@ dist/
 .idea/
 *.swp
 *.swo
+
+push_to_github.ps1
+
+push_to_github.ps1

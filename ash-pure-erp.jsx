@@ -88,6 +88,19 @@ const formatCurrency = (n) => `${(n || 0).toLocaleString("ar-EG")} ج.م`;
 const formatDate = (d) => d ? new Date(d).toLocaleDateString("ar-EG") : "-";
 const generateId = (prefix) => `${prefix}-${Date.now().toString().slice(-6)}`;
 
+const getProductIcon = (p) => {
+  const name = p.name || "";
+  if (name.includes("شامبو")) return "🧴";
+  if (name.includes("زيت")) return "💧";
+  if (name.includes("صابون")) return "🧼";
+  if (name.includes("كريم")) return "🧴";
+  if (name.includes("سيروم")) return "✨";
+  if (name.includes("بلسم")) return "🧴";
+  if (p.category === "العناية بالشعر") return "💇‍♀️";
+  if (p.category === "العناية بالبشرة") return "✨";
+  return "📦";
+};
+
 // Dynamic script loader utility for browser-side libraries
 const loadScript = (src) => {
   return new Promise((resolve, reject) => {
@@ -451,20 +464,24 @@ const styles = `
   .pos-layout { display: grid; grid-template-columns: 1fr 380px; gap: var(--p-main); height: calc(100vh - var(--header-h) - (var(--p-main) * 2)); }
   .pos-products { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
   .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; overflow-y: auto; padding: 4px; padding-bottom: 80px; }
-  .pos-product-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; cursor: pointer; transition: transform 0.2s, border-color 0.2s; text-align: center; touch-action: manipulation; }
+  .pos-product-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); text-align: center; touch-action: manipulation; display: flex; flex-direction: column; justify-content: space-between; min-height: 190px; }
+  .pos-product-card:hover { border-color: var(--gold); box-shadow: var(--shadow-gold); transform: translateY(-3px); }
   .pos-product-card:active { transform: scale(0.96); }
-  .pos-product-img { width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); background: var(--card2); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 32px; }
-  .pos-product-name { font-size: 13px; font-weight: 600; margin-bottom: 6px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .pos-product-price { font-size: 15px; font-weight: 800; color: var(--gold); }
+  .pos-product-img { width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); background: linear-gradient(135deg, var(--card2), rgba(212,175,55,0.05)); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 36px; transition: transform 0.3s ease; }
+  .pos-product-card:hover .pos-product-img { transform: scale(1.05) rotate(3deg); }
+  .pos-product-name { font-size: 13px; font-weight: 700; margin-bottom: 8px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); }
+  .pos-product-price { font-size: 16px; font-weight: 900; color: var(--gold); }
   
   .cart { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
   .cart-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
   .cart-toggle-btn { display: none; background: none; border: none; color: var(--text); font-size: 24px; padding: 8px; margin: -8px; }
-  .cart-items { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-  .cart-item { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg3); }
-  .cart-item-name { flex: 1; font-size: 13px; font-weight: 600; line-height: 1.4; }
+  .cart-items { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .cart-item { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card2); transition: all 0.2s ease; position: relative; }
+  .cart-item:hover { border-color: rgba(212,175,55,0.25); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+  .cart-item-name { font-size: 14px; font-weight: 700; line-height: 1.4; }
   .cart-item-qty { display: flex; align-items: center; gap: 8px; }
-  .qty-btn { width: 32px; height: 32px; border-radius: 8px; background: var(--card2); border: 1px solid var(--border); color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; touch-action: manipulation; }
+  .qty-btn { width: 30px; height: 30px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.15s ease; touch-action: manipulation; }
+  .qty-btn:hover { border-color: var(--gold); color: var(--gold); }
   .qty-btn:active { background: var(--border); }
   
   /* Badges & Utility */
@@ -520,6 +537,12 @@ const styles = `
     .card { padding: 16px; }
     .search-bar { display: none; } /* Hide search bar on very small screens to save header space */
   }
+
+  /* Tabs Navigation */
+  .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); margin-bottom: 20px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab { padding: 10px 16px; cursor: pointer; color: var(--text2); font-weight: 600; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; font-size: 14px; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
 
   /* Print Styles */
   @media print {
@@ -822,16 +845,99 @@ function ProductModal({ product, onSave, onClose }) {
   );
 }
 
-function ProductsPage({ products, setProducts, showNotif }) {
+function WasteModal({ products, onSave, onClose }) {
+  const [productId, setProductId] = useState(products[0]?.id || "");
+  const [type, setType] = useState("waste");
+  const [qty, setQty] = useState(1);
+  const [notes, setNotes] = useState("");
+
+  const selectedProduct = products.find(p => p.id === Number(productId));
+
+  const handleSave = () => {
+    if (!productId) return;
+    if (qty <= 0) return;
+    if (selectedProduct && qty > selectedProduct.qty) {
+      if (!confirm(`الكمية المدخلة (${qty}) أكبر من المخزون المتوفر (${selectedProduct.qty}). هل تريد الاستمرار؟`)) {
+        return;
+      }
+    }
+    onSave({
+      productId: Number(productId),
+      qty: Number(qty),
+      type,
+      notes,
+    });
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 500 }}>
+        <div className="modal-header">
+          <span className="modal-title">تسجيل هالك / هدية</span>
+          <button className="btn-icon" onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label className="form-label">المنتج *</label>
+            <select className="form-control" value={productId} onChange={e => setProductId(e.target.value)}>
+              {products.map(p => (
+                <option key={p.id} value={p.id}>{p.name} (متوفر: {p.qty})</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-2">
+            <div className="form-group">
+              <label className="form-label">النوع *</label>
+              <select className="form-control" value={type} onChange={e => setType(e.target.value)}>
+                <option value="waste">هالك (تالف / منتهي)</option>
+                <option value="gift">هدية (عينات دعائية / ترويجية)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">الكمية *</label>
+              <input className="form-control" type="number" min="1" value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">ملاحظات / سبب الحركة</label>
+            <textarea className="form-control" value={notes} onChange={e => setNotes(e.target.value)} placeholder="مثال: عينة مجانية لعميل VIP، كسر بالعبوة..." />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>إلغاء</button>
+          <button className="btn btn-primary" onClick={handleSave} style={{ background: type === 'waste' ? 'linear-gradient(135deg, var(--red), var(--gold-dark))' : 'linear-gradient(135deg, var(--blue), var(--gold-dark))' }}>
+            <Icon name="check" size={16} /> تسجيل الحركة
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductsPage({ products, setProducts, wasteLogs = [], setWasteLogs, user, showNotif }) {
+  const [subTab, setSubTab] = useState("list"); // "list" or "waste"
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("الكل");
   const [modal, setModal] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
 
+  // Waste sub-tab state
+  const [wasteSearch, setWasteSearch] = useState("");
+  const [wasteTypeFilter, setWasteTypeFilter] = useState("الكل");
+  const [wasteModal, setWasteModal] = useState(null);
+
   const filtered = products.filter(p =>
     (catFilter === "الكل" || p.category === catFilter) &&
     (p.name.includes(search) || p.sku.includes(search) || p.barcode.includes(search))
   );
+
+  const filteredWaste = (wasteLogs || []).filter(w => {
+    const prod = products.find(p => p.id === w.productId);
+    const prodName = prod ? prod.name : (w.name || "");
+    const matchesSearch = prodName.toLowerCase().includes(wasteSearch.toLowerCase()) || (w.notes || "").toLowerCase().includes(wasteSearch.toLowerCase());
+    const matchesType = wasteTypeFilter === "الكل" || w.type === wasteTypeFilter;
+    return matchesSearch && matchesType;
+  });
 
   const handleSave = (prod) => {
     if (prod.id && products.find(p => p.id === prod.id)) {
@@ -850,84 +956,197 @@ function ProductsPage({ products, setProducts, showNotif }) {
     setDeleteId(null);
   };
 
+  const handleSaveWaste = (data) => {
+    const prod = products.find(p => p.id === data.productId);
+    if (!prod) return;
+    const cost = prod.buyPrice * data.qty;
+    const newLog = {
+      id: generateId("WST"),
+      productId: data.productId,
+      qty: data.qty,
+      type: data.type,
+      cost,
+      createdBy: user?.email || "admin@ashpure.com",
+      createdAt: new Date().toISOString().split("T")[0],
+      notes: data.notes
+    };
+    // Decrease stock
+    setProducts(ps => ps.map(p => p.id === data.productId ? { ...p, qty: p.qty - data.qty } : p));
+    // Add to wasteLogs
+    if (setWasteLogs) setWasteLogs(ws => [newLog, ...ws]);
+    showNotif(data.type === "waste" ? "تم تسجيل هالك وتحديث المخزون" : "تم تسجيل هدية وتحديث المخزون", "success");
+    setWasteModal(null);
+  };
+
+  const handleDeleteWaste = (log) => {
+    if (confirm("هل أنت متأكد من حذف هذه الحركة وإرجاع الكمية للمخزون؟")) {
+      // Restore stock quantity
+      setProducts(ps => ps.map(p => p.id === log.productId ? { ...p, qty: p.qty + log.qty } : p));
+      // Delete waste log
+      if (setWasteLogs) setWasteLogs(ws => ws.filter(x => x.id !== log.id));
+      showNotif("تم حذف الحركة وإرجاع المخزون بنجاح", "success");
+    }
+  };
+
   const stockColor = (p) => p.qty === 0 ? "var(--red)" : p.qty <= p.minQty ? "var(--gold)" : "var(--green)";
-  const stockLabel = (p) => p.qty === 0 ? "نفذ" : p.qty <= p.minQty ? "منخفض" : "متوفر";
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 800 }}>إدارة المنتجات</h2>
-          <p style={{ color: "var(--text2)", fontSize: 13 }}>{products.length} منتج في المخزون</p>
+          <h2 style={{ fontSize: 20, fontWeight: 800 }}>إدارة المنتجات والمخزون</h2>
+          <p style={{ color: "var(--text2)", fontSize: 13 }}>
+            {subTab === "list" ? `${products.length} منتج في المخزون` : `${filteredWaste.length} حركة مسجلة`}
+          </p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal("new")}><Icon name="plus" size={16} />إضافة منتج</button>
-      </div>
-
-      <div className="card" style={{ marginBottom: 16, padding: "14px 20px" }}>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <div className="search-bar" style={{ flex: 1, minWidth: 200 }}>
-            <Icon name="search" size={16} style={{ color: "var(--text3)" }} />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو SKU أو الباركود..." />
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["الكل", ...CATEGORIES].map(c => (
-              <button key={c} className={`btn btn-sm ${catFilter === c ? "btn-primary" : "btn-secondary"}`} onClick={() => setCatFilter(c)}>{c}</button>
-            ))}
-          </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {subTab === "list" ? (
+            <button className="btn btn-primary" onClick={() => setModal("new")}><Icon name="plus" size={16} />إضافة منتج</button>
+          ) : (
+            <button className="btn btn-primary" onClick={() => setWasteModal("new")} style={{ background: "linear-gradient(135deg, var(--red), var(--gold-dark))" }}><Icon name="plus" size={16} />تسجيل هالك / هدية</button>
+          )}
         </div>
       </div>
 
-      <div className="card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>المنتج</th><th>SKU</th><th>التصنيف</th><th>الكمية</th>
-                <th>سعر الشراء</th><th>سعر البيع</th><th>الربح</th><th>المورد</th><th>إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={9}><div className="empty"><div className="empty-icon">📦</div><div>لا توجد منتجات</div></div></td></tr>
-              ) : filtered.map(p => (
-                <tr key={p.id}>
-                  <td data-label="المنتج">
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>💊</div>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
-                        <div style={{ fontSize: 11, color: "var(--text3)" }}>{p.barcode}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td data-label="SKU"><span className="tag">{p.sku}</span></td>
-                  <td data-label="التصنيف"><span className="badge badge-blue">{p.category}</span></td>
-                  <td data-label="الكمية">
-                    <div className="stock-indicator">
-                      <div className="stock-dot" style={{ background: stockColor(p) }} />
-                      <span style={{ color: stockColor(p), fontWeight: 600 }}>{p.qty}</span>
-                      <span style={{ color: "var(--text3)", fontSize: 10 }}>/{p.minQty} حد أدنى</span>
-                    </div>
-                  </td>
-                  <td data-label="سعر الشراء">{formatCurrency(p.buyPrice)}</td>
-                  <td data-label="سعر البيع" style={{ color: "var(--gold)", fontWeight: 600 }}>{formatCurrency(p.clientPrice)}</td>
-                  <td data-label="الربح" style={{ color: "var(--green)", fontWeight: 600 }}>{formatCurrency(p.clientPrice - p.buyPrice)}</td>
-                  <td data-label="المورد" style={{ color: "var(--text2)", fontSize: 12 }}>{p.supplier}</td>
-                  <td data-label="إجراءات">
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn-icon" onClick={() => setModal(p)} title="تعديل"><Icon name="edit" size={14} /></button>
-                      <button className="btn-icon" style={{ color: "var(--red)", borderColor: "rgba(224,90,90,0.3)" }} onClick={() => setDeleteId(p.id)} title="حذف"><Icon name="trash" size={14} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        <div className={`tab ${subTab === "list" ? "active" : ""}`} onClick={() => setSubTab("list")}>قائمة المنتجات</div>
+        <div className={`tab ${subTab === "waste" ? "active" : ""}`} onClick={() => setSubTab("waste")}>الهوالك والهدايا</div>
       </div>
+
+      {subTab === "list" ? (
+        <>
+          <div className="card" style={{ marginBottom: 16, padding: "14px 20px" }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="search-bar" style={{ flex: 1, minWidth: 200 }}>
+                <Icon name="search" size={16} style={{ color: "var(--text3)" }} />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو SKU أو الباركود..." />
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["الكل", ...CATEGORIES].map(c => (
+                  <button key={c} className={`btn btn-sm ${catFilter === c ? "btn-primary" : "btn-secondary"}`} onClick={() => setCatFilter(c)}>{c}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>المنتج</th><th>SKU</th><th>التصنيف</th><th>الكمية</th>
+                    <th>سعر الشراء</th><th>سعر البيع</th><th>الربح</th><th>المورد</th><th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr><td colSpan={9}><div className="empty"><div className="empty-icon">📦</div><div>لا توجد منتجات</div></div></td></tr>
+                  ) : filtered.map(p => (
+                    <tr key={p.id}>
+                      <td data-label="المنتج">
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>💊</div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
+                            <div style={{ fontSize: 11, color: "var(--text3)" }}>{p.barcode}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td data-label="SKU"><span className="tag">{p.sku}</span></td>
+                      <td data-label="التصنيف"><span className="badge badge-blue">{p.category}</span></td>
+                      <td data-label="الكمية">
+                        <div className="stock-indicator">
+                          <div className="stock-dot" style={{ background: stockColor(p) }} />
+                          <span style={{ color: stockColor(p), fontWeight: 600 }}>{p.qty}</span>
+                          <span style={{ color: "var(--text3)", fontSize: 10 }}>/{p.minQty} حد أدنى</span>
+                        </div>
+                      </td>
+                      <td data-label="سعر الشراء">{formatCurrency(p.buyPrice)}</td>
+                      <td data-label="سعر البيع" style={{ color: "var(--gold)", fontWeight: 600 }}>{formatCurrency(p.clientPrice)}</td>
+                      <td data-label="الربح" style={{ color: "var(--green)", fontWeight: 600 }}>{formatCurrency(p.clientPrice - p.buyPrice)}</td>
+                      <td data-label="المورد" style={{ color: "var(--text2)", fontSize: 12 }}>{p.supplier}</td>
+                      <td data-label="إجراءات">
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button className="btn-icon" onClick={() => setModal(p)} title="تعديل"><Icon name="edit" size={14} /></button>
+                          <button className="btn-icon" style={{ color: "var(--red)", borderColor: "rgba(224,90,90,0.3)" }} onClick={() => setDeleteId(p.id)} title="حذف"><Icon name="trash" size={14} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="card" style={{ marginBottom: 16, padding: "14px 20px" }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="search-bar" style={{ flex: 1, minWidth: 200 }}>
+                <Icon name="search" size={16} style={{ color: "var(--text3)" }} />
+                <input value={wasteSearch} onChange={e => setWasteSearch(e.target.value)} placeholder="بحث باسم المنتج أو الملاحظات..." />
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["الكل", "waste", "gift"].map(type => (
+                  <button 
+                    key={type} 
+                    className={`btn btn-sm ${wasteTypeFilter === type ? "btn-primary" : "btn-secondary"}`} 
+                    onClick={() => setWasteTypeFilter(type)}
+                  >
+                    {type === "الكل" ? "الكل" : type === "waste" ? "هالك 🗑️" : "هدية 🎁"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>المنتج</th><th>النوع</th><th>الكمية</th><th>التكلفة الإجمالية</th><th>التاريخ</th><th>الملاحظات / السبب</th><th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredWaste.length === 0 ? (
+                    <tr><td colSpan={7}><div className="empty"><div className="empty-icon">🗑️</div><div>لا توجد حركات مسجلة</div></div></td></tr>
+                  ) : filteredWaste.map(w => {
+                    const prod = products.find(p => p.id === w.productId);
+                    const prodName = prod ? prod.name : (w.name || `منتج #${w.productId}`);
+                    return (
+                      <tr key={w.id}>
+                        <td data-label="المنتج">
+                          <div style={{ fontWeight: 600 }}>{prodName}</div>
+                        </td>
+                        <td data-label="النوع">
+                          <span className={`badge ${w.type === 'gift' ? 'badge-green' : 'badge-red'}`}>
+                            {w.type === 'gift' ? 'هدية 🎁' : 'هالك 🗑️'}
+                          </span>
+                        </td>
+                        <td data-label="الكمية" style={{ fontWeight: 600 }}>{w.qty}</td>
+                        <td data-label="التكلفة الإجمالية">{formatCurrency(w.cost)}</td>
+                        <td data-label="التاريخ" style={{ color: "var(--text2)", fontSize: 12 }}>{formatDate(w.createdAt || w.created_at)}</td>
+                        <td data-label="الملاحظات" style={{ color: "var(--text2)", fontSize: 12 }}>{w.notes || "—"}</td>
+                        <td data-label="إجراءات">
+                          <button className="btn-icon" style={{ color: "var(--red)", borderColor: "rgba(224,90,90,0.3)" }} onClick={() => handleDeleteWaste(w)} title="حذف وإرجاع للمخزون"><Icon name="trash" size={14} /></button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
       {(modal === "new" || (modal && modal.id)) && (
         <ProductModal product={modal === "new" ? null : modal} onSave={handleSave} onClose={() => setModal(null)} />
+      )}
+
+      {wasteModal === "new" && (
+        <WasteModal products={products} onSave={handleSaveWaste} onClose={() => setWasteModal(null)} />
       )}
 
       {deleteId && (
@@ -1038,6 +1257,7 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
 
   useEffect(() => {
     setCart(prev => prev.map(i => {
+      if (i.isCustomPrice) return i;
       const p = products.find(pr => pr.id === i.productId);
       const special = selectedCustomer ? getSpecialPriceFromMock(selectedCustomer.id, i.productId) : null;
       const price = i.movement_type === 'sale' ? (special != null ? special : (p ? (p[priceKey] || p.clientPrice) : i.price)) : 0;
@@ -1113,7 +1333,10 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
             </div>
             <div style={{ display: "flex", gap: 4 }}>
               {customerTypes.map(t => (
-                <button key={t.id} className={`btn btn-sm ${customerType === t.id ? "btn-primary" : "btn-secondary"}`} onClick={() => setCustomerType(t.id)}>{t.label}</button>
+                <button key={t.id} className={`btn btn-sm ${customerType === t.id ? "btn-primary" : "btn-secondary"}`} onClick={() => {
+                  setCustomerType(t.id);
+                  setCart(prev => prev.map(item => ({ ...item, isCustomPrice: false })));
+                }}>{t.label}</button>
               ))}
             </div>
           </div>
@@ -1122,7 +1345,7 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
               const price = p[priceKey] || p.clientPrice;
               return (
                 <div key={p.id} className={`pos-product-card ${p.qty === 0 ? "out" : ""}`} onClick={() => addToCart(p)}>
-                  <div className="pos-product-img">💊</div>
+                  <div className="pos-product-img">{getProductIcon(p)}</div>
                   <div className="pos-product-name">{p.name}</div>
                   <div className="pos-product-price">{formatCurrency(price)}</div>
                   <div className="pos-product-qty">{p.qty === 0 ? "نفذ" : `متوفر: ${p.qty}`}</div>
@@ -1149,7 +1372,10 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
             </div>
             <div className="form-group" style={{ marginBottom: 8 }}>
               <label className="form-label">العميل</label>
-              <select className="form-control" value={selectedCustomer?.id || ""} onChange={e => setSelectedCustomer(customers.find(c => c.id === +e.target.value) || null)}>
+              <select className="form-control" value={selectedCustomer?.id || ""} onChange={e => {
+                setSelectedCustomer(customers.find(c => c.id === +e.target.value) || null);
+                setCart(prev => prev.map(item => ({ ...item, isCustomPrice: false })));
+              }}>
                 <option value="">عميل نقدي / بدون حساب</option>
                 {customers.filter(c => c.type === customerType).map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -1163,27 +1389,133 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
               <div className="empty"><div className="empty-icon">🛒</div><div>السلة فارغة</div><div style={{ fontSize: 12, marginTop: 4 }}>اختر منتجاً للبدء</div></div>
             ) : (
               cart.map(item => (
-                <div className="cart-item" key={item.productId}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <div className="cart-item-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>{item.name}</div>
-                      {item.movement_type === 'gift' && <div style={{ padding: '2px 6px', borderRadius: 6, background: '#1E90FF', color: '#fff', fontSize: 12 }}>هدية</div>}
-                      {item.movement_type === 'waste' && <div style={{ padding: '2px 6px', borderRadius: 6, background: '#FF4D4F', color: '#fff', fontSize: 12 }}>هالك</div>}
+                <div className="cart-item" key={item.productId} style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: 12, 
+                  padding: 16, 
+                  borderRadius: 'var(--radius)', 
+                  border: '1px solid var(--border)', 
+                  background: 'var(--card2)',
+                  transition: 'border-color 0.2s',
+                  position: 'relative'
+                }}>
+                  {/* Top Row: Name, Badges and Delete Button */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                      <div className="cart-item-name" style={{ 
+                        overflow: "hidden", 
+                        textOverflow: "ellipsis", 
+                        whiteSpace: "nowrap", 
+                        fontWeight: 700, 
+                        fontSize: 14,
+                        color: 'var(--text)'
+                      }}>
+                        {item.name}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {item.movement_type === 'gift' && <span className="badge badge-green" style={{ fontSize: 10, padding: '2px 8px' }}>هدية 🎁</span>}
+                        {item.movement_type === 'waste' && <span className="badge badge-red" style={{ fontSize: 10, padding: '2px 8px' }}>هالك 🗑️</span>}
+                        {item.movement_type === 'sale' && <span className="badge badge-gold" style={{ fontSize: 10, padding: '2px 8px' }}>بيع 💰</span>}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--text3)" }}>{item.movement_type === 'sale' ? `${formatCurrency(item.price)} × ${item.qty}` : `${item.qty} ×`}</div>
+                    <button className="btn-icon" style={{ 
+                      width: 28, 
+                      height: 28, 
+                      borderRadius: '50%', 
+                      color: 'var(--red)', 
+                      borderColor: 'transparent',
+                      background: 'rgba(224,90,90,0.1)' 
+                    }} onClick={() => removeFromCart(item.productId)} title="إزالة من السلة">
+                      <Icon name="close" size={12} />
+                    </button>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div className="cart-item-qty">
-                      <button className="qty-btn" onClick={() => updateQty(item.productId, -1)}>−</button>
-                      <span style={{ fontSize: 13, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
-                      <button className="qty-btn" onClick={() => updateQty(item.productId, 1)}>+</button>
-                      <button className="btn-icon" style={{ padding: 4, color: "var(--red)" }} onClick={() => removeFromCart(item.productId)}><Icon name="close" size={12} /></button>
+
+                  {/* Divider */}
+                  <div style={{ height: 1, background: 'rgba(255,255,255,0.05)' }} />
+
+                  {/* Bottom Row: Qty Controls, Price Input, Movement Toggle, Total Price */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    {/* Qty Controls */}
+                    <div className="cart-item-qty" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button className="qty-btn" style={{ width: 28, height: 28 }} onClick={() => updateQty(item.productId, -1)}>−</button>
+                      <span style={{ fontSize: 14, fontWeight: 800, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
+                      <button className="qty-btn" style={{ width: 28, height: 28 }} onClick={() => updateQty(item.productId, 1)}>+</button>
                     </div>
-                    <div style={{ width: 140, display: 'flex', justifyContent: 'flex-end' }}>
-                      <ProductMovementToggle value={item.movement_type || 'sale'} onChange={(val) => setCart(prev => prev.map(ci => ci.productId === item.productId ? { ...ci, movement_type: val, price: val === 'sale' ? (ci.price || 0) : 0, total: ci.qty * (val === 'sale' ? (ci.price || 0) : 0) } : ci))} />
+
+                    {/* Price Input or Label */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {item.movement_type === 'sale' ? (
+                        <>
+                          <input 
+                            type="number" 
+                            value={item.price} 
+                            onChange={(e) => {
+                              const newPrice = parseFloat(e.target.value) || 0;
+                              setCart(prev => prev.map(ci => ci.productId === item.productId ? { ...ci, price: newPrice, total: ci.qty * newPrice, isCustomPrice: true } : ci));
+                            }} 
+                            style={{ 
+                              width: 65, 
+                              background: 'var(--card)', 
+                              border: '1px solid var(--border)', 
+                              borderRadius: 'var(--radius-sm)', 
+                              color: 'var(--gold)', 
+                              padding: '4px 6px',
+                              textAlign: 'center',
+                              fontFamily: 'inherit',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              outline: 'none'
+                            }}
+                          />
+                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>ج.م</span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--text3)' }}>مجانًا</span>
+                      )}
+                    </div>
+
+                    {/* Movement Type Toggle Button Group */}
+                    <div style={{ display: 'flex', background: 'var(--card)', padding: 2, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                      {[['sale', 'بيع'], ['gift', 'هدية'], ['waste', 'هالك']].map(([type, label]) => {
+                        const active = (item.movement_type || 'sale') === type;
+                        let activeColor = 'var(--gold)';
+                        let activeBg = 'rgba(212, 175, 55, 0.15)';
+                        if (type === 'gift') { activeColor = 'var(--green)'; activeBg = 'rgba(76, 175, 133, 0.15)'; }
+                        if (type === 'waste') { activeColor = 'var(--red)'; activeBg = 'rgba(224, 90, 90, 0.15)'; }
+                        return (
+                          <button 
+                            key={type} 
+                            onClick={() => setCart(prev => prev.map(ci => ci.productId === item.productId ? { 
+                              ...ci, 
+                              movement_type: type, 
+                              price: type === 'sale' ? (ci.price || 0) : 0, 
+                              total: ci.qty * (type === 'sale' ? (ci.price || 0) : 0),
+                              isCustomPrice: type === 'sale' ? ci.isCustomPrice : false
+                            } : ci))}
+                            style={{
+                              border: 'none',
+                              background: active ? activeBg : 'transparent',
+                              color: active ? activeColor : 'var(--text3)',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '4px 8px',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                              transition: 'all 0.15s'
+                            }}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Total Price */}
+                    <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--gold)', minWidth: 60, textAlign: 'left' }}>
+                      {formatCurrency(item.total)}
                     </div>
                   </div>
-                  <div className="cart-item-price">{formatCurrency(item.total)}</div>
                 </div>
               ))
             )}
@@ -2075,7 +2407,7 @@ export default function App() {
     switch (page) {
       case "dashboard": return <Dashboard products={products} customers={customers} invoices={invoices} wasteLogs={wasteLogs} />;
       case "pos": return <POSPage products={products} setProducts={setProducts} customers={customers} invoices={invoices} setInvoices={setInvoices} showNotif={showNotif} customerTypes={dynamicCustomerTypes} wasteLogs={wasteLogs} setWasteLogs={setWasteLogs} />;
-      case "products": return <ProductsPage products={products} setProducts={setProducts} showNotif={showNotif} />;
+      case "products": return <ProductsPage products={products} setProducts={setProducts} wasteLogs={wasteLogs} setWasteLogs={setWasteLogs} user={user} showNotif={showNotif} />;
       case "customers": return <CustomersPage customers={customers} setCustomers={setCustomers} invoices={invoices} showNotif={showNotif} customerTypes={dynamicCustomerTypes} />;
       case "invoices": return <InvoicesPage invoices={invoices} customers={customers} showNotif={showNotif} customerTypes={dynamicCustomerTypes} />;
       case "reports": return <ReportsPage invoices={invoices} products={products} customers={customers} wasteLogs={wasteLogs} />;
