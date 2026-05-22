@@ -1,0 +1,13 @@
+# TODO
+- [x] فهم شكل الطلب من frontend لاستدعاء Edge Function (تم جزئيًا عبر src/api/edgeFunctions.js)
+- [x] تحديث `supabase/functions/insert_waste_protected/index.ts`:
+  - [x] استخدام JWT من `Authorization` بدل `body.user_id`
+  - [x] التحقق من role عبر `public.profiles` باستخدام auth
+  - [x] إدخال البيانات في `invoice_items` مع `movement_type` بدل `waste_logs` مباشرة (لينشط trigger)
+  - [x] إضافة validation لـ `product_id` و `qty` و `type`
+- [x] عمل migration جديد 002_complete_waste_tables_with_data.sql يشمل:
+  - [x] جدول waste_logs
+  - [x] جدول customer_special_prices
+  - [x] trigger handle_invoice_item_movement
+  - [x] RLS policies
+  - [x] sample data

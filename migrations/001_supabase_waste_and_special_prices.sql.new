@@ -1,0 +1,196 @@
+-- Migration: 001_supabase_waste_and_special_prices.sql
+-- For Supabase / PostgreSQL
+
+-- This migration creates `waste_logs` and `customer_special_prices`, adds `movement_type` on `invoice_items`,
+-- a guarded trigger to record gifts/waste and deduct stock (only when products table exists),
+-- a safe `get_price_for_customer` function, and optional RLS policy templates.
+
+-- 1) جدول تسجيل الهوالك والهدايا
+CREATE TABLE IF NOT EXISTS public.waste_logs (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  product_id bigint NOT NULL,
+  qty numeric NOT NULL CHECK (qty > 0),
+  type text NOT NULL CHECK (type IN ('gift','waste')),
+  cost numeric NOT NULL DEFAULT 0, -- إجمالي التكلفة (cost per unit * qty)
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  notes text
+);
+
+CREATE INDEX IF NOT EXISTS idx_waste_logs_product_id ON public.waste_logs (product_id);
+CREATE INDEX IF NOT EXISTS idx_waste_logs_type_created_at ON public.waste_logs (type, created_at);
+
+-- 2) جدول الأسعار الخاصة بالعملاء
+CREATE TABLE IF NOT EXISTS public.customer_special_prices (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id uuid NOT NULL,
+  product_id bigint NOT NULL,
+  special_price numeric NOT NULL CHECK (special_price >= 0),
+  min_qty integer DEFAULT 1 CHECK (min_qty >= 1),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (customer_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_csp_customer_id ON public.customer_special_prices (customer_id);
+CREATE INDEX IF NOT EXISTS idx_csp_product_id ON public.customer_special_prices (product_id);
+
+-- 3) إضافة حقل نوع الحركة لجدول بنود الفاتورة (invoice_items)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'invoice_items') THEN
+    ALTER TABLE public.invoice_items
+      ADD COLUMN IF NOT EXISTS movement_type text DEFAULT 'sale';
+  END IF;
+END$$;
+
+-- 4) Trigger function: handle movements, guarded against missing products table
+CREATE OR REPLACE FUNCTION public.handle_invoice_item_movement()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  p_cost numeric := 0;
+BEGIN
+  IF NEW.movement_type IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.movement_type = 'gift' OR NEW.movement_type = 'waste' THEN
+    -- Only attempt to adjust product stock/cost when products table exists
+    IF to_regclass('public.products') IS NOT NULL THEN
+      UPDATE public.products
+        SET stock = stock - NEW.qty
+        WHERE id = NEW.product_id;
+
+      SELECT cost INTO p_cost FROM public.products WHERE id = NEW.product_id LIMIT 1;
+      IF p_cost IS NULL THEN
+        p_cost := 0;
+      END IF;
+    ELSE
+      p_cost := 0;
+    END IF;
+
+    -- insert into waste_logs for reporting (type gift / waste)
+    INSERT INTO public.waste_logs(product_id, qty, type, cost, created_by, created_at)
+    VALUES (NEW.product_id, NEW.qty, NEW.movement_type, COALESCE(p_cost,0) * NEW.qty, auth.uid(), now());
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Create trigger only if invoice_items exists
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'invoice_items') THEN
+    -- clean up existing trigger if present
+    IF EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class c ON t.tgrelid = c.oid WHERE c.relname = 'invoice_items' AND t.tgname = 'trg_handle_invoice_item_movement') THEN
+      PERFORM pg_catalog.pg_trigger_drop((SELECT oid FROM pg_trigger WHERE tgname = 'trg_handle_invoice_item_movement'));
+    END IF;
+    CREATE TRIGGER trg_handle_invoice_item_movement
+      AFTER INSERT ON public.invoice_items
+      FOR EACH ROW
+      EXECUTE FUNCTION public.handle_invoice_item_movement();
+  END IF;
+END$$;
+
+-- 5) Safe function to get price for customer and product
+-- Behavior: return special_price if present; otherwise return product price based on customer type if tables exist; else 0.
+CREATE OR REPLACE FUNCTION public.get_price_for_customer(p_product_id bigint, p_customer_id uuid)
+RETURNS numeric LANGUAGE plpgsql STABLE AS $$
+DECLARE
+  sp_price numeric;
+  c_type text;
+  p_price numeric := 0;
+BEGIN
+  -- prefer explicit customer special price
+  IF to_regclass('public.customer_special_prices') IS NOT NULL THEN
+    SELECT special_price INTO sp_price FROM public.customer_special_prices
+    WHERE customer_id = p_customer_id AND product_id = p_product_id LIMIT 1;
+    IF sp_price IS NOT NULL THEN
+      RETURN sp_price;
+    END IF;
+  END IF;
+
+  -- if product/customer metadata exists, compute by customer type
+  IF to_regclass('public.products') IS NOT NULL AND to_regclass('public.customers') IS NOT NULL THEN
+    SELECT c.type INTO c_type FROM public.customers c WHERE c.id = p_customer_id LIMIT 1;
+    IF c_type IS NULL THEN
+      RETURN 0;
+    END IF;
+
+    IF c_type = 'trader' THEN
+      SELECT p.traderPrice INTO p_price FROM public.products p WHERE p.id = p_product_id LIMIT 1;
+    ELSIF c_type = 'specialist' THEN
+      SELECT p.specialistPrice INTO p_price FROM public.products p WHERE p.id = p_product_id LIMIT 1;
+    ELSE
+      SELECT p.clientPrice INTO p_price FROM public.products p WHERE p.id = p_product_id LIMIT 1;
+    END IF;
+
+    RETURN COALESCE(p_price, 0);
+  END IF;
+
+  RETURN 0;
+END;
+$$;
+
+-- 6) Row Level Security (RLS) templates and policies
+-- Enable RLS on relevant tables (no-op if table missing)
+ALTER TABLE IF EXISTS public.waste_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.invoice_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.customer_special_prices ENABLE ROW LEVEL SECURITY;
+
+-- Policies: create only when target tables exist. Use DO blocks to avoid errors when tables missing.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='invoice_items') THEN
+    -- drop existing policies if present
+    EXECUTE 'DROP POLICY IF EXISTS insert_invoice_items_restrict ON public.invoice_items';
+    EXECUTE 'DROP POLICY IF EXISTS insert_invoice_items_gift ON public.invoice_items';
+
+    EXECUTE 'CREATE POLICY insert_invoice_items_restrict ON public.invoice_items FOR INSERT WITH CHECK ((NEW.movement_type IS DISTINCT FROM ''waste'') OR EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = ''admin''))';
+
+    EXECUTE 'CREATE POLICY insert_invoice_items_gift ON public.invoice_items FOR INSERT WITH CHECK ((NEW.movement_type IS DISTINCT FROM ''gift'') OR EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN (''admin'',''sales'')))';
+  END IF;
+END$$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='waste_logs') THEN
+    EXECUTE 'DROP POLICY IF EXISTS allow_admin_insert_waste_logs ON public.waste_logs';
+    EXECUTE 'CREATE POLICY allow_admin_insert_waste_logs ON public.waste_logs FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = ''admin''))';
+
+    EXECUTE 'DROP POLICY IF EXISTS select_waste_logs_public ON public.waste_logs';
+    EXECUTE 'CREATE POLICY select_waste_logs_public ON public.waste_logs FOR SELECT USING (auth.role() IS NOT NULL)';
+  END IF;
+END$$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='customer_special_prices') THEN
+    EXECUTE 'DROP POLICY IF EXISTS manage_customer_special_prices ON public.customer_special_prices';
+    EXECUTE 'CREATE POLICY manage_customer_special_prices ON public.customer_special_prices FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = ''admin'')) WITH CHECK (EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = ''admin''))';
+  END IF;
+END$$;
+
+-- 7) Maintenance: update timestamp trigger for customer_special_prices
+CREATE OR REPLACE FUNCTION public.trg_update_timestamp()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='customer_special_prices') THEN
+    IF EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class c ON t.tgrelid = c.oid WHERE c.relname = 'customer_special_prices' AND t.tgname = 'trg_csp_update_ts') THEN
+      PERFORM pg_catalog.pg_trigger_drop((SELECT oid FROM pg_trigger WHERE tgname = 'trg_csp_update_ts'));
+    END IF;
+    CREATE TRIGGER trg_csp_update_ts
+      BEFORE UPDATE ON public.customer_special_prices
+      FOR EACH ROW EXECUTE FUNCTION public.trg_update_timestamp();
+  END IF;
+END$$;
+
+-- End of migration
