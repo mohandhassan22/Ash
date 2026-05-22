@@ -143,7 +143,7 @@ const downloadInvoicePDF = async (invoice, isSharing = false) => {
   `).join("");
 
   const subtotal = invoice.subtotal || invoice.items.reduce((s, i) => s + i.total, 0);
-  const discountAmt = (subtotal * (invoice.discount || 0)) / 100;
+  const discountAmt = invoice.discount || 0;
   const taxAmt = ((subtotal - discountAmt) * (invoice.tax || 0)) / 100;
   const total = invoice.total;
 
@@ -210,7 +210,7 @@ const downloadInvoicePDF = async (invoice, isSharing = false) => {
         </div>
         ${invoice.discount > 0 ? `
         <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; color: #4CAF85;">
-          <span>خصم (${invoice.discount}%):</span>
+          <span>خصم:</span>
           <span>- ${formatCurrency(discountAmt)}</span>
         </div>` : ""}
         ${invoice.tax > 0 ? `
@@ -553,6 +553,215 @@ const styles = `
     * { color: black !important; text-shadow: none !important; }
     .badge { border: 1px solid #aaa; background: transparent !important; color: black !important; }
   }
+
+  /* === ENHANCED VISUAL IMPROVEMENTS === */
+
+  /* Animated gradient background on app */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at 10% 20%, rgba(212,175,55,0.04) 0%, transparent 50%),
+                radial-gradient(ellipse at 90% 80%, rgba(139,115,85,0.05) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Improved sidebar with subtle gradient */
+  .sidebar {
+    background: linear-gradient(180deg, #0e0e16 0%, #111118 60%, #0d0d14 100%);
+    box-shadow: -4px 0 32px rgba(0,0,0,0.5);
+  }
+
+  /* Glowing logo */
+  .logo-brand {
+    text-shadow: 0 0 20px rgba(212,175,55,0.3);
+    letter-spacing: 3px;
+  }
+
+  /* Enhanced nav items */
+  .nav-item {
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  .nav-item::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(212,175,55,0.08), transparent);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .nav-item.active::before { opacity: 1; }
+  .nav-item.active {
+    box-shadow: inset 0 0 0 1px rgba(212,175,55,0.25), 0 2px 12px rgba(212,175,55,0.1);
+  }
+
+  /* Header glass effect */
+  .header {
+    background: rgba(17,17,24,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(212,175,55,0.1);
+    box-shadow: 0 2px 20px rgba(0,0,0,0.3);
+  }
+
+  /* Enhanced stat cards */
+  .stat-card {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, #14141e 0%, #1a1a26 100%);
+  }
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    top: -30px;
+    left: -30px;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(212,175,55,0.12), transparent 70%);
+    pointer-events: none;
+  }
+  .stat-value {
+    background: linear-gradient(135deg, var(--gold-light), var(--gold), var(--gold-dark));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 8px rgba(212,175,55,0.3));
+  }
+
+  /* Enhanced cards */
+  .card {
+    background: linear-gradient(135deg, #14141e 0%, #161620 100%);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.03);
+    transition: box-shadow 0.3s, border-color 0.3s;
+  }
+  .card:hover {
+    border-color: rgba(212,175,55,0.15);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(212,175,55,0.08);
+  }
+
+  /* Enhanced buttons */
+  .btn-primary {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, #e8c84a, #c9a832, #8B7355);
+    box-shadow: 0 4px 15px rgba(212,175,55,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+    text-shadow: none;
+    letter-spacing: 0.5px;
+  }
+  .btn-primary::after {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    transition: left 0.4s ease;
+  }
+  .btn-primary:hover::after { left: 150%; }
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(212,175,55,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+  }
+
+  /* Enhanced form controls */
+  .form-control {
+    background: rgba(20,20,30,0.8);
+    border: 1px solid rgba(42,42,58,0.8);
+    transition: all 0.25s;
+  }
+  .form-control:focus {
+    background: rgba(20,20,30,1);
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(212,175,55,0.15), 0 2px 8px rgba(0,0,0,0.2);
+  }
+
+  /* Enhanced POS product cards */
+  .pos-product-card {
+    background: linear-gradient(145deg, #16161f, #1c1c28);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .pos-product-card:hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: 0 12px 30px rgba(212,175,55,0.2), 0 4px 12px rgba(0,0,0,0.4);
+    border-color: rgba(212,175,55,0.5);
+  }
+
+  /* Enhanced modal */
+  .modal {
+    background: linear-gradient(145deg, #16161f, #1e1e2e);
+    box-shadow: 0 25px 50px rgba(0,0,0,0.7), 0 0 0 1px rgba(212,175,55,0.1);
+  }
+  .modal-header {
+    background: linear-gradient(90deg, rgba(212,175,55,0.05), transparent);
+    border-bottom: 1px solid rgba(212,175,55,0.15);
+  }
+
+  /* Enhanced table rows */
+  tr:hover td {
+    background: rgba(212,175,55,0.05);
+    transition: background 0.15s;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.25); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.4); }
+
+  /* Smooth page transitions */
+  .content { animation: fadeInUp 0.3s ease; }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Cart footer total styling */
+  .total-final {
+    font-size: clamp(18px, 2.5vw, 22px) !important;
+    background: linear-gradient(135deg, var(--gold-light), var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 900 !important;
+  }
+
+  /* Badge glow */
+  .badge-gold {
+    box-shadow: 0 0 8px rgba(212,175,55,0.2);
+  }
+  .badge-green {
+    box-shadow: 0 0 8px rgba(76,175,133,0.2);
+  }
+  .badge-red {
+    box-shadow: 0 0 8px rgba(224,90,90,0.2);
+  }
+
+  /* Search bar enhancement */
+  .search-bar {
+    background: rgba(20,20,30,0.9);
+    border: 1px solid rgba(42,42,58,0.8);
+    transition: all 0.25s;
+  }
+  .search-bar:focus-within {
+    border-color: rgba(212,175,55,0.4);
+    box-shadow: 0 0 0 2px rgba(212,175,55,0.1);
+  }
+
+  /* User avatar glow */
+  .user-avatar {
+    box-shadow: 0 0 12px rgba(212,175,55,0.3);
+  }
+
+  /* Cart improved */
+  .cart {
+    background: linear-gradient(180deg, #141420 0%, #16161e 100%);
+    box-shadow: -4px 0 20px rgba(0,0,0,0.2);
+  }
+
+  /* Notification styles */
+  .notif { border-left: 3px solid var(--gold) !important; }
 `;
 
 // ==================== LOGIN PAGE ====================
@@ -1267,7 +1476,7 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
 
   // subtotal counts only actual sales
   const subtotal = cart.reduce((s, i) => s + (i.movement_type === 'sale' ? i.total : 0), 0);
-  const discountAmt = (subtotal * discount) / 100;
+  const discountAmt = discount;
   const taxAmt = ((subtotal - discountAmt) * tax) / 100;
   const total = subtotal - discountAmt + taxAmt;
   const remaining = paymentMethod === "deferred" ? total - (+paidAmount || 0) : 0;
@@ -1524,8 +1733,8 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
           <div className="cart-footer">
             <div className="grid grid-2" style={{ marginBottom: 12 }}>
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">خصم %</label>
-                <input className="form-control" type="number" min="0" max="100" value={discount} onChange={e => setDiscount(+e.target.value)} />
+                <label className="form-label">خصم ج.م</label>
+                <input className="form-control" type="number" min="0" value={discount} onChange={e => setDiscount(+e.target.value)} />
               </div>
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label">ضريبة %</label>
@@ -1560,7 +1769,7 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
 
             <div style={{ padding: "12px 0", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
               <div className="total-row"><span>المجموع الفرعي</span><span>{formatCurrency(subtotal)}</span></div>
-              {discount > 0 && <div className="total-row" style={{ color: "var(--green)" }}><span>خصم ({discount}%)</span><span>- {formatCurrency(discountAmt)}</span></div>}
+              {discount > 0 && <div className="total-row" style={{ color: "var(--green)" }}><span>خصم</span><span>- {formatCurrency(discountAmt)}</span></div>}
               {tax > 0 && <div className="total-row" style={{ color: "var(--text2)" }}><span>ضريبة ({tax}%)</span><span>+ {formatCurrency(taxAmt)}</span></div>}
               {paymentMethod === "deferred" && paidAmount && <div className="total-row" style={{ color: "var(--green)" }}><span>المدفوع</span><span>{formatCurrency(+paidAmount)}</span></div>}
               {remaining > 0 && <div className="total-row" style={{ color: "var(--red)" }}><span>المتبقي</span><span>{formatCurrency(remaining)}</span></div>}
@@ -2019,7 +2228,7 @@ function InvoicesPage({ invoices, customers, showNotif, customerTypes }) {
               </div>
               <div style={{ background: "var(--card)", borderRadius: "var(--radius-sm)", padding: 16 }}>
                 <div className="total-row"><span>المجموع الفرعي</span><span>{formatCurrency(viewInvoice.subtotal)}</span></div>
-                {viewInvoice.discount > 0 && <div className="total-row" style={{ color: "var(--green)" }}><span>خصم ({viewInvoice.discount}%)</span><span>- {formatCurrency(viewInvoice.subtotal * viewInvoice.discount / 100)}</span></div>}
+                {viewInvoice.discount > 0 && <div className="total-row" style={{ color: "var(--green)" }}><span>خصم</span><span>- {formatCurrency(viewInvoice.discount)}</span></div>}
                 <div className="total-row" style={{ fontSize: 16, fontWeight: 800, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)" }}><span>الإجمالي</span><span style={{ color: "var(--gold)" }}>{formatCurrency(viewInvoice.total)}</span></div>
                 {viewInvoice.remaining > 0 && <div className="total-row" style={{ color: "var(--red)" }}><span>المتبقي</span><span>{formatCurrency(viewInvoice.remaining)}</span></div>}
               </div>
