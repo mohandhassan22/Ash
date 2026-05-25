@@ -1,39 +1,94 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { createClient } from "@supabase/supabase-js";
 import ProductMovementToggle from "./src/components/ProductMovementToggle.jsx";
 import CustomerSpecialPrices from "./src/components/CustomerSpecialPrices.jsx";
 import DashboardWasteSummary from "./src/components/DashboardWasteSummary.jsx";
 
 // ==================== SUPABASE CONFIG ====================
-// Replace with your actual Supabase credentials
-const SUPABASE_URL = "https://your-project.supabase.co";
-const SUPABASE_ANON_KEY = "your-anon-key";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Mock Supabase client (replace with real @supabase/supabase-js in production)
-const supabase = {
-  from: (table) => ({
-    select: (cols = "*") => ({
-      order: (col, opts) => ({ data: [], error: null }),
-      eq: (col, val) => ({ data: [], error: null }),
-      data: [], error: null
-    }),
-    insert: (data) => ({ data, error: null }),
-    update: (data) => ({ eq: (col, val) => ({ data, error: null }) }),
-    delete: () => ({ eq: (col, val) => ({ data: null, error: null }) }),
-  }),
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    signInWithPassword: async ({ email, password }) => {
-      if (email === "admin@ashpure.com" && password === "admin123") {
-        return { data: { user: { id: "1", email, role: "admin" } }, error: null };
-      }
-      if (email === "sales@ashpure.com" && password === "sales123") {
-        return { data: { user: { id: "2", email, role: "sales" } }, error: null };
-      }
-      return { data: null, error: { message: "بيانات الدخول غير صحيحة" } };
-    },
-    signOut: async () => ({ error: null }),
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
+// ==================== AUTH HELPERS ====================
+// تسجيل الدخول بالـ username عن طريق جلب الإيميل من profiles أولاً
+export async function signInWithUsername(username, password) {
+  // جلب الإيميل المرتبط بالـ username من جدول profiles
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, username, full_name, role, permissions, is_active")
+    .eq("username", username.trim().toLowerCase())
+    .single();
+
+  if (profileError || !profile) {
+    return { data: null, error: { message: "اسم المستخدم غير موجود" } };
   }
-};
+
+  if (!profile.is_active) {
+    return { data: null, error: { message: "هذا الحساب موقوف، تواصل مع المدير" } };
+  }
+
+  // جلب الإيميل من auth.users عن طريق Edge Function أو direct sign in
+  // نستخدم convention: email = username@ashpure.internal
+  const fakeEmail = `${username.trim().toLowerCase()}@ashpure.internal`;
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: fakeEmail,
+    password,
+  });
+
+  if (error) return { data: null, error: { message: "كلمة المرور غير صحيحة" } };
+
+  return {
+    data: {
+      user: {
+        ...data.user,
+        username: profile.username,
+        name: profile.full_name || profile.username,
+        role: profile.role,
+        permissions: profile.permissions || getDefaultPermissions(profile.role),
+      },
+      session: data.session,
+    },
+    error: null,
+  };
+}
+
+function getDefaultPermissions(role) {
+  if (role === "admin") {
+    return { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: true, settings: true };
+  }
+  return { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: false, settings: false };
+}
+
+// جلب بيانات الجلسة الحالية عند تحميل الصفحة
+export async function getCurrentUserProfile() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return null;
+
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("id, username, full_name, role, permissions, is_active")
+    .eq("id", session.user.id)
+    .single();
+
+  if (error || !profile || !profile.is_active) return null;
+
+  return {
+    ...session.user,
+    username: profile.username,
+    name: profile.full_name || profile.username,
+    role: profile.role,
+    permissions: profile.permissions || getDefaultPermissions(profile.role),
+  };
+}
 
 // ==================== INITIAL MOCK DATA ====================
 const INITIAL_PRODUCTS = [
@@ -717,6 +772,10 @@ const styles = `
     from { opacity: 0; transform: translateY(12px); }
     to { opacity: 1; transform: translateY(0); }
   }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 
   /* Cart footer total styling */
   .total-final {
@@ -766,21 +825,19 @@ const styles = `
 
 // ==================== LOGIN PAGE ====================
 function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState("admin@ashpure.com");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (!username.trim() || !password) return setError("أدخل اسم المستخدم وكلمة المرور");
     setLoading(true);
     setError("");
-    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error: err } = await signInWithUsername(username, password);
     if (err) setError(err.message);
-    else {
-      const roleMap = { "admin@ashpure.com": "admin", "sales@ashpure.com": "sales" };
-      onLogin({ ...data.user, role: roleMap[email] || "admin", name: email === "admin@ashpure.com" ? "المدير العام" : "موظف مبيعات" });
-    }
+    else onLogin(data.user);
     setLoading(false);
   };
 
@@ -795,21 +852,45 @@ function LoginPage({ onLogin }) {
         <form onSubmit={handleLogin}>
           {error && <div className="alert alert-danger">{error}</div>}
           <div className="form-group">
-            <label className="form-label">البريد الإلكتروني</label>
-            <input className="form-control" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@ashpure.com" />
+            <label className="form-label">اسم المستخدم</label>
+            <input
+              className="form-control"
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="username"
+              autoComplete="username"
+              autoFocus
+            />
           </div>
           <div className="form-group">
             <label className="form-label">كلمة المرور</label>
-            <input className="form-control" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+            <input
+              className="form-control"
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="current-password"
+            />
           </div>
-          <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: "13px", marginTop: 8 }} disabled={loading}>
-            {loading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: "100%", justifyContent: "center", padding: "13px", marginTop: 8 }}
+            disabled={loading}
+          >
+            {loading ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 16, height: 16, border: "2px solid rgba(0,0,0,0.3)", borderTop: "2px solid #000", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+                جاري تسجيل الدخول...
+              </span>
+            ) : "تسجيل الدخول"}
           </button>
         </form>
-        <div style={{ marginTop: 24, padding: "16px", background: "var(--bg3)", borderRadius: "var(--radius-sm)", fontSize: 12, color: "var(--text3)" }}>
-          <div style={{ marginBottom: 6, fontWeight: 600, color: "var(--text2)" }}>حسابات تجريبية:</div>
-          <div>المدير: admin@ashpure.com / admin123</div>
-          <div>المبيعات: sales@ashpure.com / sales123</div>
+        <div style={{ marginTop: 20, display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", background: "rgba(212,175,55,0.06)", borderRadius: "var(--radius-sm)", border: "1px solid rgba(212,175,55,0.12)" }}>
+          <Icon name="warning" size={14} />
+          <span style={{ fontSize: 12, color: "var(--text3)" }}>تسجيل الدخول عبر اسم المستخدم فقط. تواصل مع المدير لإنشاء حساب.</span>
         </div>
       </div>
     </div>
@@ -2448,22 +2529,138 @@ function ReportsPage({ invoices, products, customers, wasteLogs = [] }) {
 }
 
 // ==================== SETTINGS ====================
-function SettingsPage({ user, showNotif }) {
+// ==================== SETTINGS PAGE ====================
+const PAGE_LABELS = {
+  dashboard: "الرئيسية",
+  pos:       "نقطة البيع",
+  products:  "المنتجات",
+  customers: "العملاء",
+  invoices:  "الفواتير",
+  reports:   "التقارير",
+  settings:  "الإعدادات",
+};
+
+function SettingsPage({ user, showNotif, onUserUpdated }) {
+  const isAdmin = user.role === "admin";
   const [activeTab, setActiveTab] = useState("general");
   const [settings, setSettings] = useState({
     companyName: "Ash Pure", taxRate: 14, currency: "ج.م", lowStockAlert: 10,
     address: "القاهرة، مصر", phone: "01000000000", email: "info@ashpure.com"
   });
 
+  // ── Users Management State ──
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [editingUser, setEditingUser] = useState(null); // profile being edited
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({ username: "", full_name: "", password: "", role: "sales", permissions: { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: false, settings: false } });
+  const [savingUser, setSavingUser] = useState(false);
+
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, username, full_name, role, permissions, is_active, created_at")
+      .order("created_at", { ascending: true });
+    if (!error && data) setUsers(data);
+    setUsersLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === "users" && isAdmin) loadUsers();
+  }, [activeTab]);
+
+  // ── إضافة مستخدم جديد (الأدمن بس) ──
+  const handleAddUser = async () => {
+    if (!newUser.username || !newUser.password) return showNotif("أدخل اسم المستخدم وكلمة المرور", "error");
+    if (newUser.password.length < 8) return showNotif("كلمة المرور لازم تكون 8 أحرف على الأقل", "error");
+    setSavingUser(true);
+
+    const fakeEmail = `${newUser.username.trim().toLowerCase()}@ashpure.internal`;
+
+    // إنشاء اليوزر في auth عبر Supabase Admin API (بس متاح من server side)
+    // بديل: نستخدم signUp عادي وبعدين نحدث الـ profile
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: fakeEmail,
+      password: newUser.password,
+      options: {
+        data: {
+          username: newUser.username.trim().toLowerCase(),
+          full_name: newUser.full_name,
+          role: newUser.role,
+        }
+      }
+    });
+
+    if (authError) {
+      showNotif(authError.message, "error");
+      setSavingUser(false);
+      return;
+    }
+
+    // تحديث الـ profile بالبيانات الصحيحة (الـ trigger هيعملها تلقائي بس نحدث الصلاحيات)
+    if (authData?.user) {
+      await supabase.from("profiles").upsert({
+        id: authData.user.id,
+        username: newUser.username.trim().toLowerCase(),
+        full_name: newUser.full_name,
+        role: newUser.role,
+        permissions: newUser.permissions,
+        is_active: true,
+      });
+    }
+
+    showNotif(`تم إضافة المستخدم @${newUser.username} بنجاح`, "success");
+    setShowAddUser(false);
+    setNewUser({ username: "", full_name: "", password: "", role: "sales", permissions: { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: false, settings: false } });
+    loadUsers();
+    setSavingUser(false);
+  };
+
+  // ── تحديث صلاحيات مستخدم ──
+  const handleSaveUserPerms = async (profileId, updatedFields) => {
+    setSavingUser(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update(updatedFields)
+      .eq("id", profileId);
+
+    if (error) showNotif("فشل حفظ التغييرات: " + error.message, "error");
+    else {
+      showNotif("تم حفظ الصلاحيات بنجاح", "success");
+      // لو عدلنا على نفس المستخدم الحالي → نحدث الـ state
+      if (profileId === user.id && onUserUpdated) {
+        const refreshed = await getCurrentUserProfile();
+        if (refreshed) onUserUpdated(refreshed);
+      }
+      loadUsers();
+    }
+    setEditingUser(null);
+    setSavingUser(false);
+  };
+
+  // ── تفعيل / إيقاف مستخدم ──
+  const handleToggleActive = async (profileId, currentStatus) => {
+    if (profileId === user.id) return showNotif("لا تقدر توقف حسابك الخاص", "warning");
+    const { error } = await supabase.from("profiles").update({ is_active: !currentStatus }).eq("id", profileId);
+    if (error) showNotif("فشل التعديل", "error");
+    else { showNotif(!currentStatus ? "تم تفعيل الحساب" : "تم إيقاف الحساب", "success"); loadUsers(); }
+  };
+
+  const tabs = isAdmin
+    ? [["general", "عام"], ["users", "إدارة المستخدمين"], ["backup", "النسخ الاحتياطي"]]
+    : [["general", "عام"], ["backup", "النسخ الاحتياطي"]];
+
   return (
     <div>
       <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 20 }}>الإعدادات</h2>
-      <div className="tabs" style={{ maxWidth: 500 }}>
-        {[["general", "عام"], ["users", "المستخدمون"], ["backup", "النسخ الاحتياطي"]].map(([id, label]) => (
+      <div className="tabs">
+        {tabs.map(([id, label]) => (
           <div key={id} className={`tab ${activeTab === id ? "active" : ""}`} onClick={() => setActiveTab(id)}>{label}</div>
         ))}
       </div>
 
+      {/* ── عام ── */}
       {activeTab === "general" && (
         <div className="card" style={{ maxWidth: 600 }}>
           <div className="card-header"><span className="card-title">إعدادات النظام</span></div>
@@ -2505,30 +2702,69 @@ function SettingsPage({ user, showNotif }) {
         </div>
       )}
 
-      {activeTab === "users" && (
-        <div className="card" style={{ maxWidth: 600 }}>
-          <div className="card-header"><span className="card-title">إدارة المستخدمين</span></div>
-          {[
-            { name: "المدير العام", email: "admin@ashpure.com", role: "admin", roleLabel: "مدير" },
-            { name: "موظف المبيعات", email: "sales@ashpure.com", role: "sales", roleLabel: "مبيعات" },
-          ].map((u, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 0", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg, var(--gold), var(--gold-dark))", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 16, color: "#000" }}>
-                {u.name.charAt(0)}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>{u.name}</div>
-                <div style={{ fontSize: 12, color: "var(--text3)" }}>{u.email}</div>
-              </div>
-              <span className="badge badge-gold">{u.roleLabel}</span>
+      {/* ── إدارة المستخدمين (الأدمن بس) ── */}
+      {activeTab === "users" && isAdmin && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* زر إضافة مستخدم */}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn btn-primary" onClick={() => setShowAddUser(true)}>
+              <Icon name="plus" size={16} /> إضافة مستخدم جديد
+            </button>
+          </div>
+
+          {/* قائمة المستخدمين */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">المستخدمون ({users.length})</span>
+              <button className="btn btn-ghost btn-sm" onClick={loadUsers}><Icon name="refresh" size={14} />تحديث</button>
             </div>
-          ))}
-          <div style={{ marginTop: 16 }}>
-            <div className="alert alert-warning"><Icon name="warning" size={14} />لإضافة مستخدمين جدد، قم بإضافتهم عبر Supabase Dashboard ثم تحديد الدور في قاعدة البيانات.</div>
+            {usersLoading ? (
+              <div style={{ textAlign: "center", padding: 40, color: "var(--text3)" }}>جاري التحميل...</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                {users.map(u => (
+                  <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ width: 44, height: 44, borderRadius: "50%", background: u.role === "admin" ? "linear-gradient(135deg, var(--gold), var(--gold-dark))" : "linear-gradient(135deg, var(--blue), #3a6baa)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: "#000", flexShrink: 0 }}>
+                      {(u.full_name || u.username || "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{u.full_name || u.username}</div>
+                      <div style={{ fontSize: 12, color: "var(--text3)" }}>@{u.username}</div>
+                      {/* صلاحيات المستخدم */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                        {u.role === "admin" ? (
+                          <span className="badge badge-gold" style={{ fontSize: 10 }}>كل الصلاحيات</span>
+                        ) : (
+                          Object.entries(PAGE_LABELS).map(([key, label]) => (
+                            <span key={key} className={`badge ${(u.permissions || {})[key] ? "badge-green" : "badge-red"}`} style={{ fontSize: 10, opacity: (u.permissions || {})[key] ? 1 : 0.45 }}>
+                              {(u.permissions || {})[key] ? "✓" : "✗"} {label}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <span className={`badge ${u.role === "admin" ? "badge-gold" : "badge-green"}`}>
+                        {u.role === "admin" ? "مدير" : "موظف"}
+                      </span>
+                      <span className={`badge ${u.is_active ? "badge-green" : "badge-red"}`} style={{ cursor: "pointer" }} onClick={() => handleToggleActive(u.id, u.is_active)}>
+                        {u.is_active ? "نشط" : "موقوف"}
+                      </span>
+                      {u.id !== user.id && u.role !== "admin" && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingUser({ ...u, permissions: { ...{ dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: false, settings: false }, ...(u.permissions || {}) } })}>
+                          <Icon name="edit" size={14} />تعديل
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
+      {/* ── نسخ احتياطي ── */}
       {activeTab === "backup" && (
         <div className="card" style={{ maxWidth: 600 }}>
           <div className="card-header"><span className="card-title">النسخ الاحتياطي والاستعادة</span></div>
@@ -2540,6 +2776,118 @@ function SettingsPage({ user, showNotif }) {
               <Icon name="download" size={16} />تصدير قاعدة البيانات (Excel)
             </button>
             <div className="alert alert-warning"><Icon name="warning" size={14} />يُنصح بأخذ نسخة احتياطية أسبوعياً. Supabase يحتفظ بنسخ احتياطية تلقائية.</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal تعديل صلاحيات مستخدم ── */}
+      {editingUser && (
+        <div className="modal-overlay" onClick={() => setEditingUser(null)}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">تعديل صلاحيات @{editingUser.username}</span>
+              <button className="btn-icon btn-sm" onClick={() => setEditingUser(null)}><Icon name="close" size={18} /></button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">الدور الوظيفي</label>
+                <select className="form-control" value={editingUser.role} onChange={e => setEditingUser(u => ({ ...u, role: e.target.value }))}>
+                  <option value="sales">موظف مبيعات</option>
+                  <option value="viewer">مشاهد فقط</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label" style={{ marginBottom: 12 }}>الصلاحيات</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {Object.entries(PAGE_LABELS).map(([key, label]) => (
+                    <label key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "var(--card2)", borderRadius: 8, cursor: "pointer", border: `1px solid ${editingUser.permissions[key] ? "rgba(76,175,133,0.3)" : "var(--border)"}` }}>
+                      <span style={{ fontWeight: 600 }}>{label}</span>
+                      <div
+                        onClick={() => setEditingUser(u => ({ ...u, permissions: { ...u.permissions, [key]: !u.permissions[key] } }))}
+                        style={{
+                          width: 44, height: 24, borderRadius: 12, transition: "all 0.25s",
+                          background: editingUser.permissions[key] ? "var(--green)" : "var(--border)",
+                          position: "relative", cursor: "pointer", flexShrink: 0
+                        }}
+                      >
+                        <div style={{
+                          position: "absolute", top: 3, transition: "left 0.25s",
+                          left: editingUser.permissions[key] ? 23 : 3,
+                          width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                          boxShadow: "0 1px 4px rgba(0,0,0,0.3)"
+                        }} />
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setEditingUser(null)}>إلغاء</button>
+              <button className="btn btn-primary" disabled={savingUser}
+                onClick={() => handleSaveUserPerms(editingUser.id, { role: editingUser.role, permissions: editingUser.permissions })}>
+                {savingUser ? "جاري الحفظ..." : <><Icon name="check" size={16} />حفظ الصلاحيات</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal إضافة مستخدم جديد ── */}
+      {showAddUser && (
+        <div className="modal-overlay" onClick={() => setShowAddUser(false)}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">إضافة مستخدم جديد</span>
+              <button className="btn-icon btn-sm" onClick={() => setShowAddUser(false)}><Icon name="close" size={18} /></button>
+            </div>
+            <div className="modal-body">
+              <div className="grid grid-2">
+                <div className="form-group">
+                  <label className="form-label">اسم المستخدم *</label>
+                  <input className="form-control" value={newUser.username} onChange={e => setNewUser(u => ({ ...u, username: e.target.value.toLowerCase().replace(/\s/g, "") })} placeholder="ahmed_sales" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">الاسم الكامل</label>
+                  <input className="form-control" value={newUser.full_name} onChange={e => setNewUser(u => ({ ...u, full_name: e.target.value }))} placeholder="أحمد محمد" />
+                </div>
+              </div>
+              <div className="grid grid-2">
+                <div className="form-group">
+                  <label className="form-label">كلمة المرور *</label>
+                  <input className="form-control" type="password" value={newUser.password} onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))} placeholder="8 أحرف على الأقل" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">الدور</label>
+                  <select className="form-control" value={newUser.role} onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}>
+                    <option value="sales">موظف مبيعات</option>
+                    <option value="viewer">مشاهد فقط</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label" style={{ marginBottom: 10 }}>الصلاحيات</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {Object.entries(PAGE_LABELS).map(([key, label]) => (
+                    <label key={key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "var(--card2)", borderRadius: 8, cursor: "pointer", border: `1px solid ${newUser.permissions[key] ? "rgba(76,175,133,0.3)" : "var(--border)"}` }}>
+                      <div
+                        onClick={() => setNewUser(u => ({ ...u, permissions: { ...u.permissions, [key]: !u.permissions[key] } }))}
+                        style={{ width: 38, height: 20, borderRadius: 10, background: newUser.permissions[key] ? "var(--green)" : "var(--border)", position: "relative", cursor: "pointer", flexShrink: 0, transition: "background 0.2s" }}
+                      >
+                        <div style={{ position: "absolute", top: 2, left: newUser.permissions[key] ? 20 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowAddUser(false)}>إلغاء</button>
+              <button className="btn btn-primary" disabled={savingUser} onClick={handleAddUser}>
+                {savingUser ? "جاري الإضافة..." : <><Icon name="plus" size={16} />إضافة المستخدم</>}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2558,9 +2906,38 @@ function Notifications({ notifs }) {
   );
 }
 
+// ==================== PERMISSION GUARD ====================
+function usePermission(user, page) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  const perms = user.permissions || {};
+  return !!perms[page];
+}
+
+// ==================== LOADING SCREEN ====================
+function LoadingScreen() {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "var(--bg)",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, zIndex: 9999
+    }}>
+      <div className="logo-brand" style={{ fontSize: 28 }}>ASH PURE</div>
+      <div style={{
+        width: 40, height: 40,
+        border: "3px solid rgba(212,175,55,0.2)",
+        borderTop: "3px solid var(--gold)",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite"
+      }} />
+      <div style={{ fontSize: 13, color: "var(--text3)" }}>جاري التحقق من الجلسة...</div>
+    </div>
+  );
+}
+
 // ==================== MAIN APP ====================
 export default function App() {
   const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [page, setPage] = useState("dashboard");
   const [products, setProducts] = useState(INITIAL_PRODUCTS);
   const [customers, setCustomers] = useState(INITIAL_CUSTOMERS);
@@ -2570,15 +2947,48 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
 
+  // ── استعادة الجلسة عند تحميل الصفحة ──
+  useEffect(() => {
+    let mounted = true;
+
+    const restoreSession = async () => {
+      const profile = await getCurrentUserProfile();
+      if (mounted) {
+        setUser(profile);
+        setAuthLoading(false);
+      }
+    };
+
+    restoreSession();
+
+    // الاستماع لتغييرات الـ auth state (تسجيل دخول/خروج من تاب تانية)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT") {
+        if (mounted) setUser(null);
+      } else if (event === "TOKEN_REFRESHED" && session) {
+        // تحديث بيانات المستخدم عند تجديد التوكن
+        const profile = await getCurrentUserProfile();
+        if (mounted && profile) setUser(profile);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setPage("dashboard");
+  };
+
   const dynamicCustomerTypes = useMemo(() => {
     const list = [...CUSTOMER_TYPES];
     customers.forEach(c => {
       if (c.type && !list.some(t => t.id === c.type)) {
-        list.push({
-          id: c.type,
-          label: c.type,
-          priceKey: c.priceKey || "clientPrice"
-        });
+        list.push({ id: c.type, label: c.type, priceKey: c.priceKey || "clientPrice" });
       }
     });
     return list;
@@ -2593,6 +3003,15 @@ export default function App() {
   const lowStockCount = products.filter(p => p.qty <= p.minQty).length;
   const debtCount = customers.filter(c => c.balance > 0).length;
 
+  // ── شاشة التحميل أثناء التحقق من الجلسة ──
+  if (authLoading) return (
+    <>
+      <style>{styles}</style>
+      <LoadingScreen />
+    </>
+  );
+
+  // ── إذا مفيش جلسة → صفحة تسجيل الدخول ──
   if (!user) return (
     <>
       <style>{styles}</style>
@@ -2600,28 +3019,48 @@ export default function App() {
     </>
   );
 
-  const navItems = [
-    { id: "dashboard", label: "الرئيسية", icon: "dashboard" },
-    { id: "pos", label: "نقطة البيع", icon: "pos" },
-    { id: "products", label: "المنتجات والمخزون", icon: "products", badge: lowStockCount > 0 ? lowStockCount : null },
-    { id: "customers", label: "العملاء", icon: "customers" },
-    { id: "invoices", label: "الفواتير", icon: "invoices" },
-    { id: "reports", label: "التقارير", icon: "reports" },
-    { id: "settings", label: "الإعدادات", icon: "settings" },
+  // ── قائمة الصفحات مع فلترة الصلاحيات ──
+  const allNavItems = [
+    { id: "dashboard",  label: "الرئيسية",            icon: "dashboard" },
+    { id: "pos",        label: "نقطة البيع",           icon: "pos" },
+    { id: "products",   label: "المنتجات والمخزون",    icon: "products", badge: lowStockCount > 0 ? lowStockCount : null },
+    { id: "customers",  label: "العملاء",              icon: "customers" },
+    { id: "invoices",   label: "الفواتير",             icon: "invoices" },
+    { id: "reports",    label: "التقارير",             icon: "reports" },
+    { id: "settings",   label: "الإعدادات",            icon: "settings" },
   ];
 
-  const pageTitle = navItems.find(n => n.id === page)?.label || "";
+  const navItems = allNavItems.filter(item => {
+    if (user.role === "admin") return true;
+    const perms = user.permissions || {};
+    return !!perms[item.id];
+  });
+
+  // إذا الصفحة الحالية مش مسموح بيها → ارجع للـ dashboard
+  const canAccessPage = user.role === "admin" || !!(user.permissions || {})[page];
+
+  const pageTitle = allNavItems.find(n => n.id === page)?.label || "";
 
   const renderPage = () => {
+    if (!canAccessPage) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 16 }}>
+          <div style={{ fontSize: 48 }}>🔒</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>ليس لديك صلاحية لهذه الصفحة</div>
+          <div style={{ color: "var(--text3)", fontSize: 14 }}>تواصل مع مدير النظام لمنح الصلاحية</div>
+          <button className="btn btn-primary" onClick={() => setPage("dashboard")}>العودة للرئيسية</button>
+        </div>
+      );
+    }
     switch (page) {
       case "dashboard": return <Dashboard products={products} customers={customers} invoices={invoices} wasteLogs={wasteLogs} />;
-      case "pos": return <POSPage products={products} setProducts={setProducts} customers={customers} invoices={invoices} setInvoices={setInvoices} showNotif={showNotif} customerTypes={dynamicCustomerTypes} wasteLogs={wasteLogs} setWasteLogs={setWasteLogs} />;
-      case "products": return <ProductsPage products={products} setProducts={setProducts} wasteLogs={wasteLogs} setWasteLogs={setWasteLogs} user={user} showNotif={showNotif} />;
+      case "pos":       return <POSPage products={products} setProducts={setProducts} customers={customers} invoices={invoices} setInvoices={setInvoices} showNotif={showNotif} customerTypes={dynamicCustomerTypes} wasteLogs={wasteLogs} setWasteLogs={setWasteLogs} />;
+      case "products":  return <ProductsPage products={products} setProducts={setProducts} wasteLogs={wasteLogs} setWasteLogs={setWasteLogs} user={user} showNotif={showNotif} />;
       case "customers": return <CustomersPage customers={customers} setCustomers={setCustomers} invoices={invoices} showNotif={showNotif} customerTypes={dynamicCustomerTypes} />;
-      case "invoices": return <InvoicesPage invoices={invoices} customers={customers} showNotif={showNotif} customerTypes={dynamicCustomerTypes} />;
-      case "reports": return <ReportsPage invoices={invoices} products={products} customers={customers} wasteLogs={wasteLogs} />;
-      case "settings": return <SettingsPage user={user} showNotif={showNotif} />;
-      default: return null;
+      case "invoices":  return <InvoicesPage invoices={invoices} customers={customers} showNotif={showNotif} customerTypes={dynamicCustomerTypes} />;
+      case "reports":   return <ReportsPage invoices={invoices} products={products} customers={customers} wasteLogs={wasteLogs} />;
+      case "settings":  return <SettingsPage user={user} showNotif={showNotif} onUserUpdated={setUser} />;
+      default:          return null;
     }
   };
 
@@ -2681,7 +3120,7 @@ export default function App() {
                 <div className="user-name">{user.name}</div>
                 <div className="user-role">{user.role === "admin" ? "مدير النظام" : "موظف مبيعات"}</div>
               </div>
-              <button className="btn-icon" title="تسجيل الخروج" onClick={() => setUser(null)}><Icon name="logout" size={16} /></button>
+              <button className="btn-icon" title="تسجيل الخروج" onClick={handleLogout}><Icon name="logout" size={16} /></button>
             </div>
           </div>
         </div>
