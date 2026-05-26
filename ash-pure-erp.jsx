@@ -23,7 +23,7 @@ export async function signInWithUsername(username, password) {
   // جلب الإيميل المرتبط بالـ username من جدول profiles
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id, username, full_name, role, permissions, is_active")
+    .select("id, username, email, full_name, role, permissions, is_active")
     .eq("username", username.trim().toLowerCase())
     .single();
 
@@ -35,12 +35,23 @@ export async function signInWithUsername(username, password) {
     return { data: null, error: { message: "هذا الحساب موقوف، تواصل مع المدير" } };
   }
 
-  // جلب الإيميل من auth.users عن طريق Edge Function أو direct sign in
-  // نستخدم convention: email = username@ashpure.internal
-  const fakeEmail = `${username.trim().toLowerCase()}@ashpure.internal`;
+  // محاولة تسجيل الدخول مباشرة بالإيميل أو اسم المستخدم
+  let loginEmail = username.trim().toLowerCase();
+  
+  // إذا لم يكن المدخل إيميل، نحاول تخمين الإيميل بناءً على الـ profile
+  if (!loginEmail.includes("@")) {
+    // جلب الإيميل الحقيقي من جدول profiles إذا كان مخزناً هناك (أو استخدام الـ convention)
+    const { data: profileWithEmail } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("username", loginEmail)
+      .single();
+    
+    loginEmail = profileWithEmail?.email || `${loginEmail}@ashpure.internal`;
+  }
 
   const { data, error } = await supabase.auth.signInWithPassword({
-    email: fakeEmail,
+    email: loginEmail,
     password,
   });
 
@@ -79,7 +90,7 @@ export async function getCurrentUserProfile() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, username, full_name, role, permissions, is_active")
+    .select("id, username, email, full_name, role, permissions, is_active")
     .eq("id", session.user.id)
     .single();
 
@@ -118,7 +129,7 @@ const INITIAL_INVOICES = [
 ];
 
 const INITIAL_WASTE_LOGS = [
-  { id: "WST-001", productId: 1, name: "شامبو أش بيور للشعر الجاف", qty: 3, type: "waste", cost: 255, createdBy: "admin@ashpure.com", createdAt: "2026-05-10", notes: "عبوة تالفة عند الاستلام" },
+  { id: "WST-001", productId: 1, name: "شامبو أش بيور للشعر الجاف", qty: 3, type: "waste", cost: 255, createdBy: "honda229204@gmail.com", createdAt: "2026-05-10", notes: "عبوة تالفة عند الاستلام" },
   { id: "WST-002", productId: 2, name: "كريم أش بيور للترطيب العميق", qty: 2, type: "gift", cost: 240, createdBy: "sales@ashpure.com", createdAt: "2026-05-12", notes: "هدية دعائية لصالون لمسة جمال" },
   { id: "WST-003", productId: 4, name: "بلسم أش بيور للشعر التالف", qty: 1, type: "waste", cost: 95, createdBy: "admin@ashpure.com", createdAt: "2026-05-18", notes: "منتهية الصلاحية" }
 ];
@@ -1105,7 +1116,7 @@ function LoginPage({ onLogin }) {
               type="text"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              placeholder="username"
+              placeholder="اسم المستخدم أو البريد الإلكتروني"
               autoComplete="username"
               autoFocus
             />
