@@ -124,8 +124,8 @@ const INITIAL_INVOICES = [
 
 const INITIAL_WASTE_LOGS = [
   { id: "WST-001", productId: 1, name: "شامبو أش بيور للشعر الجاف", qty: 3, type: "waste", cost: 255, createdBy: "honda229204@gmail.com", createdAt: "2026-05-10", notes: "عبوة تالفة عند الاستلام" },
-  { id: "WST-002", productId: 2, name: "كريم أش بيور للترطيب العميق", qty: 2, type: "gift", cost: 240, createdBy: "sales@ashpure.com", createdAt: "2026-05-12", notes: "هدية دعائية لصالون لمسة جمال" },
-  { id: "WST-003", productId: 4, name: "بلسم أش بيور للشعر التالف", qty: 1, type: "waste", cost: 95, createdBy: "admin@ashpure.com", createdAt: "2026-05-18", notes: "منتهية الصلاحية" }
+  { id: "WST-002", productId: 2, name: "كريم أش بيور للترطيب العميق", qty: 2, type: "gift", cost: 240, createdBy: "honda229204@gmail.com", createdAt: "2026-05-12", notes: "هدية دعائية لصالون لمسة جمال" },
+  { id: "WST-003", productId: 4, name: "بلسم أش بيور للشعر التالف", qty: 1, type: "waste", cost: 95, createdBy: "honda229204@gmail.com", createdAt: "2026-05-18", notes: "منتهية الصلاحية" }
 ];
 
 const INITIAL_SPECIAL_PRICES = [
@@ -1508,7 +1508,7 @@ function ProductsPage({ products, setProducts, wasteLogs = [], setWasteLogs, use
       qty: data.qty,
       type: data.type,
       cost,
-      createdBy: user?.email || "admin@ashpure.com",
+      createdBy: user?.email || "unknown",
       createdAt: new Date().toISOString().split("T")[0],
       notes: data.notes
     };
@@ -2816,7 +2816,7 @@ function SettingsPage({ user, showNotif, onUserUpdated }) {
   const [activeTab, setActiveTab] = useState("general");
   const [settings, setSettings] = useState({
     companyName: "Ash Pure", taxRate: 14, currency: "ج.م", lowStockAlert: 10,
-    address: "القاهرة، مصر", phone: "01000000000", email: "info@ashpure.com"
+    address: "القاهرة، مصر", phone: "01000000000", email: "honda229204@gmail.com"
   });
 
   // ── Users Management State ──
