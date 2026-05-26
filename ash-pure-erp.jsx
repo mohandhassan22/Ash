@@ -18,37 +18,31 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // ==================== AUTH HELPERS ====================
-// تسجيل الدخول بالـ username عن طريق جلب الإيميل من profiles أولاً
-export async function signInWithUsername(username, password) {
-  // جلب الإيميل المرتبط بالـ username من جدول profiles
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id, username, email, full_name, role, permissions, is_active")
-    .eq("username", username.trim().toLowerCase())
-    .single();
+// تسجيل الدخول بالـ username أو الـ email
+export async function signInWithUsername(loginIdentifier, password) {
+  const cleanIdentifier = loginIdentifier.trim().toLowerCase();
+  
+  // البحث عن البروفايل أولاً لمعرفة الإيميل الحقيقي والتحقق من الحالة
+  let query = supabase.from("profiles").select("id, username, email, full_name, role, permissions, is_active");
+  
+  if (cleanIdentifier.includes("@")) {
+    query = query.eq("email", cleanIdentifier);
+  } else {
+    query = query.eq("username", cleanIdentifier);
+  }
+
+  const { data: profile, error: profileError } = await query.single();
 
   if (profileError || !profile) {
-    return { data: null, error: { message: "اسم المستخدم غير موجود" } };
+    return { data: null, error: { message: "بيانات الدخول غير صحيحة أو الحساب غير موجود" } };
   }
 
   if (!profile.is_active) {
     return { data: null, error: { message: "هذا الحساب موقوف، تواصل مع المدير" } };
   }
 
-  // محاولة تسجيل الدخول مباشرة بالإيميل أو اسم المستخدم
-  let loginEmail = username.trim().toLowerCase();
-  
-  // إذا لم يكن المدخل إيميل، نحاول تخمين الإيميل بناءً على الـ profile
-  if (!loginEmail.includes("@")) {
-    // جلب الإيميل الحقيقي من جدول profiles إذا كان مخزناً هناك (أو استخدام الـ convention)
-    const { data: profileWithEmail } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("username", loginEmail)
-      .single();
-    
-    loginEmail = profileWithEmail?.email || `${loginEmail}@ashpure.internal`;
-  }
+  // استخدام الإيميل من البروفايل لتسجيل الدخول في Auth
+  const loginEmail = profile.email || (cleanIdentifier.includes("@") ? cleanIdentifier : `${cleanIdentifier}@ashpure.internal`);
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email: loginEmail,
