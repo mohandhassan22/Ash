@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   username     text        UNIQUE NOT NULL,
   full_name    text,
   role         text        NOT NULL DEFAULT 'sales'
-                           CHECK (role IN ('admin', 'sales', 'viewer')),
+                           CHECK (role IN ('admin', 'sales', 'warehouse')),
   permissions  jsonb       NOT NULL DEFAULT '{
     "dashboard": true,
     "pos":       true,
@@ -160,8 +160,9 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
     _role,
     CASE _role
-      WHEN 'admin' THEN '{"dashboard":true,"pos":true,"products":true,"customers":true,"invoices":true,"reports":true,"settings":true}'::jsonb
-      ELSE              '{"dashboard":true,"pos":true,"products":true,"customers":true,"invoices":true,"reports":false,"settings":false}'::jsonb
+      WHEN 'admin'     THEN '{"dashboard":true,"pos":true,"products":true,"customers":true,"invoices":true,"reports":true,"settings":false}'::jsonb
+      WHEN 'warehouse' THEN '{"dashboard":false,"pos":false,"products":true,"customers":false,"invoices":false,"reports":false,"settings":false}'::jsonb
+      ELSE                  '{"dashboard":false,"pos":true,"products":false,"customers":true,"invoices":true,"reports":false,"settings":false}'::jsonb
     END,
     true
   )
@@ -223,3 +224,29 @@ WHERE id = 'PASTE_ADMIN_UUID_HERE';
 -- SELECT id, username, full_name, role, is_active, created_at
 -- FROM public.profiles
 -- ORDER BY created_at;
+
+
+-- ================================================================
+-- 8. تحديث صلاحيات الـ roles الموجودة
+--    شغّل بعد أي تغيير في هيكل الصلاحيات
+-- ================================================================
+
+-- مدير: كل الصفحات ما عدا الإعدادات
+UPDATE public.profiles
+SET permissions = '{"dashboard":true,"pos":true,"products":true,"customers":true,"invoices":true,"reports":true,"settings":false}'::jsonb
+WHERE role = 'admin';
+
+-- موظف مبيعات: نقطة البيع + العملاء + الفواتير
+UPDATE public.profiles
+SET permissions = '{"dashboard":false,"pos":true,"products":false,"customers":true,"invoices":true,"reports":false,"settings":false}'::jsonb
+WHERE role = 'sales';
+
+-- مدير مخزن: المنتجات والمخزون والهوالك فقط
+UPDATE public.profiles
+SET permissions = '{"dashboard":false,"pos":false,"products":true,"customers":false,"invoices":false,"reports":false,"settings":false}'::jsonb
+WHERE role = 'warehouse';
+
+-- تحديث الـ constraint لإضافة warehouse
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check
+  CHECK (role IN ('admin', 'sales', 'warehouse'));
