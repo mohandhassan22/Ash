@@ -33,37 +33,68 @@ export async function signInWithUsername(loginIdentifier, password) {
 
   const { data: profile, error: profileError } = await query.single();
 
-  if (profileError || !profile) {
-    return { data: null, error: { message: "بيانات الدخول غير صحيحة أو الحساب غير موجود" } };
-  }
+  // إذا وجدنا البروفايل، نستخدم الإيميل المرتبط به
+  if (profile && !profileError) {
+    if (!profile.is_active) {
+      return { data: null, error: { message: "هذا الحساب موقوف، تواصل مع المدير" } };
+    }
 
-  if (!profile.is_active) {
-    return { data: null, error: { message: "هذا الحساب موقوف، تواصل مع المدير" } };
-  }
+    const loginEmail = profile.email || (cleanIdentifier.includes("@") ? cleanIdentifier : `${cleanIdentifier}@ashpure.internal`);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail,
+      password,
+    });
 
-  // استخدام الإيميل من البروفايل لتسجيل الدخول في Auth
-  const loginEmail = profile.email || (cleanIdentifier.includes("@") ? cleanIdentifier : `${cleanIdentifier}@ashpure.internal`);
+    if (error) return { data: null, error: { message: "كلمة المرور غير صحيحة" } };
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: loginEmail,
-    password,
-  });
-
-  if (error) return { data: null, error: { message: "كلمة المرور غير صحيحة" } };
-
-  return {
-    data: {
-      user: {
-        ...data.user,
-        username: profile.username,
-        name: profile.full_name || profile.username,
-        role: profile.role,
-        permissions: profile.permissions || getDefaultPermissions(profile.role),
+    return {
+      data: {
+        user: {
+          ...data.user,
+          username: profile.username,
+          name: profile.full_name || profile.username,
+          role: profile.role,
+          permissions: profile.permissions || getDefaultPermissions(profile.role),
+        },
+        session: data.session,
       },
-      session: data.session,
-    },
-    error: null,
-  };
+      error: null,
+    };
+  }
+
+  // إذا لم نجد بروفايل، قد يكون المستخدم جديداً أو هناك مشكلة في جدول الـ profiles
+  // سنحاول تسجيل الدخول مباشرة بالإيميل إذا كان المدخل إيميل
+  if (cleanIdentifier.includes("@")) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanIdentifier,
+      password,
+    });
+
+    if (!error) {
+      // جلب البروفايل بعد تسجيل الدخول الناجح
+      const { data: newProfile } = await supabase
+        .from("profiles")
+        .select("id, username, email, full_name, role, permissions, is_active")
+        .eq("id", data.user.id)
+        .single();
+
+      return {
+        data: {
+          user: {
+            ...data.user,
+            username: newProfile?.username || cleanIdentifier.split("@")[0],
+            name: newProfile?.full_name || data.user.email,
+            role: newProfile?.role || "sales",
+            permissions: newProfile?.permissions || getDefaultPermissions(newProfile?.role || "sales"),
+          },
+          session: data.session,
+        },
+        error: null,
+      };
+    }
+  }
+
+  return { data: null, error: { message: "بيانات الدخول غير صحيحة" } };
 }
 
 function getDefaultPermissions(role) {
