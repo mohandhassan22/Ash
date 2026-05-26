@@ -63,9 +63,13 @@ export async function signInWithUsername(username, password) {
 
 function getDefaultPermissions(role) {
   if (role === "admin") {
-    return { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: true, settings: true };
+    return { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: true, settings: false };
   }
-  return { dashboard: true, pos: true, products: true, customers: true, invoices: true, reports: false, settings: false };
+  if (role === "warehouse") {
+    return { dashboard: false, pos: false, products: true, customers: false, invoices: false, reports: false, settings: false };
+  }
+  // sales
+  return { dashboard: false, pos: true, products: false, customers: true, invoices: true, reports: false, settings: false };
 }
 
 // جلب بيانات الجلسة الحالية عند تحميل الصفحة
@@ -171,7 +175,160 @@ const loadScript = (src) => {
   });
 };
 
-const downloadInvoicePDF = async (invoice, isSharing = false) => {
+// ==================== EXCEL EXPORT ====================
+const exportInvoicesToExcel = async (invoices, customers) => {
+  // Load SheetJS from CDN
+  await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  const XLSX = window.XLSX;
+
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: ملخص الفواتير ──
+  const invoiceRows = invoices.map(inv => ({
+    "رقم الفاتورة":      inv.id,
+    "التاريخ":           inv.date,
+    "العميل":            inv.customerName || "عميل نقدي",
+    "نوع العميل":        inv.customerType || "-",
+    "المجموع الفرعي":    inv.subtotal || 0,
+    "الخصم":             inv.discount || 0,
+    "الضريبة":           inv.tax || 0,
+    "الإجمالي":          inv.total || 0,
+    "المدفوع":           inv.paid || 0,
+    "المتبقي":           inv.remaining || 0,
+    "طريقة الدفع":       inv.paymentMethod === "cash" ? "نقدي" : inv.paymentMethod === "card" ? "بطاقة" : inv.paymentMethod === "deferred" ? "آجل" : inv.paymentMethod,
+    "الحالة":            inv.status === "paid" ? "مدفوعة" : inv.status === "partial" ? "جزئي" : "آجل",
+    "تاريخ الاستحقاق":   inv.dueDate || "-",
+  }));
+
+  const ws1 = XLSX.utils.json_to_sheet(invoiceRows);
+
+  // تحديد عرض الأعمدة
+  ws1["!cols"] = [
+    { wch: 16 }, { wch: 12 }, { wch: 22 }, { wch: 14 },
+    { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
+    { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 },
+  ];
+
+  // تنسيق الهيدر بخلفية ذهبية
+  const headerRange = XLSX.utils.decode_range(ws1["!ref"]);
+  for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
+    const cell = XLSX.utils.encode_cell({ r: 0, c: C });
+    if (!ws1[cell]) continue;
+    ws1[cell].s = {
+      font:      { bold: true, color: { rgb: "000000" }, sz: 12 },
+      fill:      { fgColor: { rgb: "D4AF37" } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: {
+        top:    { style: "thin", color: { rgb: "8B7355" } },
+        bottom: { style: "thin", color: { rgb: "8B7355" } },
+        left:   { style: "thin", color: { rgb: "8B7355" } },
+        right:  { style: "thin", color: { rgb: "8B7355" } },
+      }
+    };
+  }
+
+  // تلوين صفوف البيانات بالتناوب
+  for (let R = 1; R <= headerRange.e.r; R++) {
+    const isEven = R % 2 === 0;
+    for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
+      const cell = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!ws1[cell]) ws1[cell] = { t: "s", v: "" };
+      ws1[cell].s = {
+        fill:      { fgColor: { rgb: isEven ? "1E1E2E" : "16161F" } },
+        font:      { color: { rgb: "E0E0E0" }, sz: 11 },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: {
+          bottom: { style: "thin", color: { rgb: "2A2A3A" } },
+          left:   { style: "thin", color: { rgb: "2A2A3A" } },
+          right:  { style: "thin", color: { rgb: "2A2A3A" } },
+        }
+      };
+      // تلوين خاص لعمود الحالة
+      const colName = invoiceRows[0] ? Object.keys(invoiceRows[0])[C] : "";
+      if (colName === "الحالة" && ws1[cell].v) {
+        const val = ws1[cell].v;
+        ws1[cell].s.font.color = { rgb: val === "مدفوعة" ? "4CAF85" : val === "جزئي" ? "D4AF37" : "E05A5A" };
+        ws1[cell].s.font.bold = true;
+      }
+    }
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws1, "الفواتير");
+
+  // ── Sheet 2: تفاصيل بنود الفواتير ──
+  const itemRows = [];
+  invoices.forEach(inv => {
+    (inv.items || []).forEach(item => {
+      itemRows.push({
+        "رقم الفاتورة": inv.id,
+        "التاريخ":      inv.date,
+        "العميل":       inv.customerName || "عميل نقدي",
+        "المنتج":       item.name,
+        "الكمية":       item.qty,
+        "السعر":        item.price,
+        "الإجمالي":     item.total,
+        "نوع الحركة":  item.movement_type === "sale" ? "بيع" : item.movement_type === "gift" ? "هدية" : "هالك",
+      });
+    });
+  });
+
+  const ws2 = XLSX.utils.json_to_sheet(itemRows);
+  ws2["!cols"] = [{ wch: 16 }, { wch: 12 }, { wch: 22 }, { wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+
+  // تنسيق هيدر الشيت الثاني
+  const range2 = XLSX.utils.decode_range(ws2["!ref"] || "A1");
+  for (let C = range2.s.c; C <= range2.e.c; C++) {
+    const cell = XLSX.utils.encode_cell({ r: 0, c: C });
+    if (!ws2[cell]) continue;
+    ws2[cell].s = {
+      font:      { bold: true, color: { rgb: "000000" }, sz: 12 },
+      fill:      { fgColor: { rgb: "8B7355" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border:    { bottom: { style: "medium", color: { rgb: "D4AF37" } } }
+    };
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws2, "تفاصيل البنود");
+
+  // ── Sheet 3: ملخص المبيعات حسب العميل ──
+  const byCustomer = {};
+  invoices.forEach(inv => {
+    const k = inv.customerName || "عميل نقدي";
+    if (!byCustomer[k]) byCustomer[k] = { total: 0, count: 0, paid: 0, remaining: 0 };
+    byCustomer[k].total     += inv.total || 0;
+    byCustomer[k].paid      += inv.paid  || 0;
+    byCustomer[k].remaining += inv.remaining || 0;
+    byCustomer[k].count++;
+  });
+
+  const summaryRows = Object.entries(byCustomer).map(([name, d]) => ({
+    "العميل":           name,
+    "عدد الفواتير":     d.count,
+    "إجمالي المشتريات": d.total,
+    "المدفوع":          d.paid,
+    "المتبقي":          d.remaining,
+  })).sort((a, b) => b["إجمالي المشتريات"] - a["إجمالي المشتريات"]);
+
+  const ws3 = XLSX.utils.json_to_sheet(summaryRows);
+  ws3["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 14 }];
+
+  const range3 = XLSX.utils.decode_range(ws3["!ref"] || "A1");
+  for (let C = range3.s.c; C <= range3.e.c; C++) {
+    const cell = XLSX.utils.encode_cell({ r: 0, c: C });
+    if (!ws3[cell]) continue;
+    ws3[cell].s = {
+      font:      { bold: true, color: { rgb: "000000" }, sz: 12 },
+      fill:      { fgColor: { rgb: "4CAF85" } },
+      alignment: { horizontal: "center", vertical: "center" },
+    };
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws3, "ملخص العملاء");
+
+  // تصدير الملف
+  const date = new Date().toISOString().split("T")[0];
+  XLSX.writeFile(wb, `AshPure_Invoices_${date}.xlsx`);
+};
   // 1. Dynamic CDN Loading for PDF dependencies
   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
@@ -516,23 +673,113 @@ const styles = `
   textarea.form-control { resize: vertical; min-height: 100px; padding: 12px 16px; }
   
   /* POS Layout */
-  .pos-layout { display: grid; grid-template-columns: 1fr 380px; gap: var(--p-main); height: calc(100vh - var(--header-h) - (var(--p-main) * 2)); }
+  .pos-layout { display: grid; grid-template-columns: 1fr 420px; gap: var(--p-main); height: calc(100vh - var(--header-h) - (var(--p-main) * 2)); }
   .pos-products { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
-  .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; overflow-y: auto; padding: 4px; padding-bottom: 80px; }
-  .pos-product-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); text-align: center; touch-action: manipulation; display: flex; flex-direction: column; justify-content: space-between; min-height: 190px; }
-  .pos-product-card:hover { border-color: var(--gold); box-shadow: var(--shadow-gold); transform: translateY(-3px); }
-  .pos-product-card:active { transform: scale(0.96); }
-  .pos-product-img { width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); background: linear-gradient(135deg, var(--card2), rgba(212,175,55,0.05)); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 36px; transition: transform 0.3s ease; }
-  .pos-product-card:hover .pos-product-img { transform: scale(1.05) rotate(3deg); }
-  .pos-product-name { font-size: 13px; font-weight: 700; margin-bottom: 8px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); }
-  .pos-product-price { font-size: 16px; font-weight: 900; color: var(--gold); }
-  
-  .cart { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-  .cart-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 14px; overflow-y: auto; padding: 4px; padding-bottom: 80px; }
+
+  /* POS Product Card — luxury dark tile */
+  .pos-product-card {
+    background: linear-gradient(145deg, #16161f 0%, #1c1c2a 100%);
+    border: 1px solid rgba(42,42,60,0.8);
+    border-radius: 14px;
+    padding: 18px 14px 14px;
+    cursor: pointer;
+    transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: center;
+    touch-action: manipulation;
+    display: flex; flex-direction: column; justify-content: space-between;
+    min-height: 200px;
+    position: relative;
+    overflow: hidden;
+  }
+  .pos-product-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(212,175,55,0.4), transparent);
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .pos-product-card::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 0%, rgba(212,175,55,0.06) 0%, transparent 60%);
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .pos-product-card:hover {
+    border-color: rgba(212,175,55,0.45);
+    box-shadow: 0 12px 35px rgba(212,175,55,0.15), 0 4px 12px rgba(0,0,0,0.4);
+    transform: translateY(-4px);
+  }
+  .pos-product-card:hover::before, .pos-product-card:hover::after { opacity: 1; }
+  .pos-product-card:active { transform: scale(0.95); }
+  .pos-product-card.out { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6); }
+  .pos-product-card.out:hover { transform: none; box-shadow: none; border-color: rgba(42,42,60,0.8); }
+
+  .pos-product-img {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: linear-gradient(135deg, rgba(212,175,55,0.12), rgba(212,175,55,0.04));
+    border: 1px solid rgba(212,175,55,0.15);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 12px; font-size: 32px;
+    transition: transform 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  .pos-product-card:hover .pos-product-img { transform: scale(1.08) rotate(5deg); }
+  .pos-product-name { font-size: 12px; font-weight: 700; margin-bottom: 8px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); }
+  .pos-product-price { font-size: 17px; font-weight: 900; color: var(--gold); letter-spacing: -0.5px; }
+  .pos-product-qty { font-size: 11px; color: var(--text3); margin-top: 4px; font-weight: 500; }
+
+  /* Cart panel */
+  .cart {
+    background: linear-gradient(180deg, #141420 0%, #161622 100%);
+    border: 1px solid rgba(42,42,58,0.8);
+    border-radius: 16px;
+    display: flex; flex-direction: column; overflow: hidden;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -4px 0 30px rgba(0,0,0,0.2);
+  }
+  .cart-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    background: rgba(212,175,55,0.03);
+  }
   .cart-toggle-btn { display: none; background: none; border: none; color: var(--text); font-size: 24px; padding: 8px; margin: -8px; }
-  .cart-items { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-  .cart-item { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card2); transition: all 0.2s ease; position: relative; }
-  .cart-item:hover { border-color: rgba(212,175,55,0.25); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+  .cart-items { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Cart item */
+  .cart-item {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(42,42,58,0.8);
+    background: rgba(20,20,30,0.6);
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  .cart-item:hover { border-color: rgba(212,175,55,0.2); background: rgba(20,20,30,0.9); box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+
+  .cart-item-name { font-size: 13px; font-weight: 700; line-height: 1.4; }
+  .cart-item-qty { display: flex; align-items: center; gap: 8px; }
+
+  /* Cart footer totals */
+  .cart-footer { padding: 16px 18px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; color: var(--text2); }
+  .total-final {
+    font-size: 22px !important; font-weight: 900 !important;
+    background: linear-gradient(135deg, #f0d060, #d4af37);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 8px rgba(212,175,55,0.3));
+  }
+
+  /* Qty buttons */
+  .qty-btn {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: rgba(212,175,55,0.1);
+    border: 1px solid rgba(212,175,55,0.2);
+    color: var(--gold); font-size: 18px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .qty-btn:hover { background: rgba(212,175,55,0.2); border-color: var(--gold); transform: scale(1.1); }
   .cart-item-name { font-size: 14px; font-weight: 700; line-height: 1.4; }
   .cart-item-qty { display: flex; align-items: center; gap: 8px; }
   .qty-btn { width: 30px; height: 30px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.15s ease; touch-action: manipulation; }
@@ -1653,12 +1900,15 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
 
         <div className={`cart ${mobileCartOpen ? 'open' : ''}`}>
           <div className="cart-header">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button className="cart-toggle-btn" onClick={() => setMobileCartOpen(false)}><Icon name="close" size={24} /></button>
-                <span style={{ fontWeight: 700 }}>🛒 السلة ({cart.length} منتج)</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 15 }}>🛒 السلة</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{cart.length} منتج • {totalCartQty} قطعة</div>
+                </div>
               </div>
-              {cart.length > 0 && <button className="btn btn-danger btn-sm" onClick={() => setCart([])}>مسح الكل</button>}
+              {cart.length > 0 && <button className="btn btn-danger btn-sm" style={{ fontSize: 11 }} onClick={() => setCart([])}>مسح الكل</button>}
             </div>
             <div className="form-group" style={{ marginBottom: 8 }}>
               <label className="form-label">العميل</label>
@@ -1857,8 +2107,8 @@ function POSPage({ products, setProducts, customers, invoices, setInvoices, show
               <div className="total-row" style={{ marginTop: 8 }}><span style={{ fontSize: 16, fontWeight: 700 }}>الإجمالي</span><span className="total-final">{formatCurrency(total)}</span></div>
             </div>
 
-            <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: "14px" }} onClick={handleCheckout} disabled={cart.length === 0}>
-              <Icon name="check" size={18} /> إتمام البيع وطباعة الفاتورة
+            <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: "16px", fontSize: 16, fontWeight: 800, borderRadius: 12, letterSpacing: 0.5, boxShadow: "0 8px 25px rgba(212,175,55,0.35)" }} onClick={handleCheckout} disabled={cart.length === 0}>
+              <Icon name="check" size={20} /> إتمام البيع وطباعة الفاتورة
             </button>
           </div>
         </div>
@@ -2158,6 +2408,20 @@ function InvoicesPage({ invoices, customers, showNotif, customerTypes }) {
   const [statusFilter, setStatusFilter] = useState("الكل");
   const [viewInvoice, setViewInvoice] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (invoices.length === 0) return showNotif("لا توجد فواتير للتصدير", "warning");
+    setIsExporting(true);
+    try {
+      await exportInvoicesToExcel(invoices, customers);
+      showNotif("تم تصدير الفواتير بنجاح ✅", "success");
+    } catch (e) {
+      showNotif("فشل التصدير: " + e.message, "error");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleShareInvoice = async (invoice) => {
     setIsSharing(true);
@@ -2207,7 +2471,9 @@ function InvoicesPage({ invoices, customers, showNotif, customerTypes }) {
           <h2 style={{ fontSize: 20, fontWeight: 800 }}>إدارة الفواتير</h2>
           <p style={{ color: "var(--text2)", fontSize: 13 }}>{invoices.length} فاتورة إجمالية</p>
         </div>
-        <button className="btn btn-secondary"><Icon name="download" size={16} />تصدير Excel</button>
+        <button className="btn btn-secondary" onClick={handleExportExcel} disabled={isExporting}>
+          <Icon name="download" size={16} />{isExporting ? "جاري التصدير..." : "تصدير Excel"}
+        </button>
       </div>
 
       <div className="card" style={{ marginBottom: 16, padding: "14px 20px" }}>
@@ -2793,7 +3059,7 @@ function SettingsPage({ user, showNotif, onUserUpdated }) {
                 <label className="form-label">الدور الوظيفي</label>
                 <select className="form-control" value={editingUser.role} onChange={e => setEditingUser(u => ({ ...u, role: e.target.value }))}>
                   <option value="sales">موظف مبيعات</option>
-                  <option value="viewer">مشاهد فقط</option>
+                  <option value="warehouse">مدير مخزن</option>
                 </select>
               </div>
               <div className="form-group">
@@ -2861,7 +3127,7 @@ function SettingsPage({ user, showNotif, onUserUpdated }) {
                   <label className="form-label">الدور</label>
                   <select className="form-control" value={newUser.role} onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}>
                     <option value="sales">موظف مبيعات</option>
-                    <option value="viewer">مشاهد فقط</option>
+                    <option value="warehouse">مدير مخزن</option>
                   </select>
                 </div>
               </div>
