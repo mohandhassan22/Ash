@@ -1,33 +1,81 @@
-ملف الإعدادات والتعليمات للـ Supabase
+# 🛡️ إعداد Supabase — Ash Pure ERP
 
-خطوات سريعة لتطبيق المهاجرة والتأكد من الصلاحيات:
+## الخطوات بالترتيب
 
-1) تنفيذ SQL migration
-- افتح لوحة Supabase -> SQL Editor
-- الصق محتوى الملف `migrations/001_supabase_waste_and_special_prices.sql` وشغّله
+### الخطوة 1 — إنشاء الجداول
+شغّل في **Supabase → SQL Editor**:
+```
+all_tables_schema.sql
+```
 
-2) توصيات سياسات RLS
-- إذا كنت تستخدم RLS فعّلها على الجداول `waste_logs` و `invoice_items` و `customer_special_prices` بعد مراجعة السياسات في الملف.
-- افترضنا وجود جدول `profiles` يحتوي على `id (uuid)` و `role (text)` بقيم `admin` و `sales`.
-- لتطبيق سياسة تمنع المستخدمين غير الأدمن من تسجيل 'waste' استخدم Policy مماثلة للتي في الملف SQL (معلّقة)
+### الخطوة 2 — تفعيل الأمان (RLS + Triggers + Policies)
+شغّل:
+```
+migrations/003_add_username_and_security.sql
+```
+أو لو بتبدأ من الصفر:
+```
+auth_security_setup.sql
+```
 
-3) Edge Functions (موصى به)
-- لتعزيز الأمان ينصح بإنشاء Edge Function على Supabase للتحقق من `auth.uid()` ودور المستخدم قبل إدراج نوع `waste`.
-- واجهات CRUD للـ `customer_special_prices` يمكن إنشاؤها كـ Edge Functions أو استدعاء مباشر من الـ client مع قواعد RLS مناسبة.
+### الخطوة 3 — إنشاء أول أدمن
 
-4) متغيرات البيئة
-- ضع `VITE_SUPABASE_URL` و `VITE_SUPABASE_ANON_KEY` في `.env` أو إعدادات Vite.
+1. روح **Supabase Dashboard → Authentication → Users**
+2. اضغط **Add user** وادخل:
+   - Email: `admin@ashpure.internal`
+   - Password: كلمة مرور قوية (8 حروف+)
+3. انسخ الـ **UUID** بتاعه
+4. شغّل في SQL Editor:
 
-5) UI integration
-- قمت بإضافة مكونات مساعدة في `src/components` و واجهات API في `src/api` للتكامل مع الـ frontend.
+```sql
+UPDATE public.profiles
+SET
+  role        = 'admin',
+  username    = 'admin',
+  full_name   = 'المدير العام',
+  permissions = '{"dashboard":true,"pos":true,"products":true,"customers":true,"invoices":true,"reports":true,"settings":true}'::jsonb,
+  is_active   = true
+WHERE id = 'PASTE_UUID_HERE';
+```
 
-6) الخطوات التالية المقترحة
-- إنشاء Edge Function لحماية إدراج `waste` (admin only).
-- تعديل مكون الفاتورة/البند لإرسال `movement_type` عند الإضافة.
-- تعديل شاشة POS لاستخدام `ProductMovementToggle` وتلوين العناصر.
-- إضافة تقارير على الـ Dashboard تستعلم من `waste_logs` و `customer_special_prices`.
+### الخطوة 4 — متغيرات البيئة
+اعمل ملف `.env` في روت المشروع:
+```env
+VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...
+```
 
-إذا ترغب أستطيع:
-- إنشاء Edge Function جاهز.
-- تعديل مكونات الفاتورة وPOS الحالية في المشروع لتضمين التعديلات.
-- إعداد صفحات إدارة `الأسعار الخاصة` في واجهة العملاء.
+---
+
+## كيف بيشتغل النظام؟
+
+### تسجيل الدخول
+- المستخدم بيدخل **username** + password فقط
+- النظام بيحول الـ username → `username@ashpure.internal` داخلياً
+- Supabase بيرجع **JWT Token** صالح للجلسة
+
+### حماية البيانات (RLS)
+- **كل request** لازم يكون معاه **JWT Token** عشان يشوف أي بيانات
+- بدون توكن = مفيش بيانات (حتى لو عرفت الـ URL)
+- كل مستخدم بيشوف بياناته بس من `profiles`
+
+### الصلاحيات
+| Role | الصلاحيات |
+|------|-----------|
+| `admin` | كل الصفحات + إدارة المستخدمين |
+| `sales` | نقطة البيع + العملاء + الفواتير |
+| `warehouse` | المنتجات والمخزون فقط |
+
+### إضافة مستخدم جديد
+من داخل التطبيق: **الإعدادات → إدارة المستخدمين** (الأدمن فقط)
+
+---
+
+## أخطاء شائعة
+
+| الخطأ | الحل |
+|-------|-------|
+| `column p.username does not exist` | شغّل `migrations/003_add_username_and_security.sql` |
+| `invalid login credentials` | تأكد إن اليوزر اتعمل بالصيغة `username@ashpure.internal` |
+| `permission denied` | تأكد إن RLS شغال والـ policies اتضافت |
+| بيانات مش بتظهر | تأكد إن الـ VITE_SUPABASE_ANON_KEY صح في `.env` |
